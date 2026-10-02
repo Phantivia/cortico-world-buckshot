@@ -2,6 +2,7 @@ export interface BuckshotTarget {
   id: string;
   label: string;
   kind: string;
+  caption?: string;
   side?: string;
   slot?: number;
   value?: number;
@@ -19,10 +20,11 @@ export interface BuckshotObservation {
 export interface BuckshotSnapshot {
   revision: number;
   scene: string;
+  view?: string;
   menu?: string;
   mode?: string;
   round?: number;
-  outcome?: 'won';
+  outcome?: 'won' | 'completed';
   cash?: number;
   actions: BuckshotTarget[];
   inventory: Array<{ item: string; side: string; slot: number }>;
@@ -38,6 +40,9 @@ export interface BuckshotSnapshot {
   inputActions: string[];
   players?: Array<{ seat: number; name: string; health: number | null }>;
   freeLook?: boolean;
+  activeSeat?: number;
+  turnOrder?: 'CW' | 'CCW';
+  jammerSelection?: { seat: number | null; light: 'green' | 'red' };
 }
 
 export interface BuckshotReply {
@@ -46,7 +51,6 @@ export interface BuckshotReply {
   ok: boolean;
   detail: string;
   snapshot?: BuckshotSnapshot;
-  observations?: BuckshotObservation[];
   png?: string;
 }
 

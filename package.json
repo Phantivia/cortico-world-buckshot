@@ -4,20 +4,41 @@
   "type": "module",
   "description": "Buckshot Roulette game events and player actions for Cortico",
   "license": "MIT",
-  "keywords": ["cortico-world", "cortico", "buckshot-roulette"],
-  "engines": { "node": ">=22" },
+  "keywords": [
+    "cortico-world",
+    "cortico",
+    "buckshot-roulette"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@11.5.0",
   "main": "./src/index.ts",
-  "cortico": { "kind": "world", "api": 5, "displayName": "恶魔轮盘" },
-  "files": ["src", "scripts", "README.md", "LICENSE"],
+  "cortico": {
+    "kind": "world",
+    "api": 5,
+    "displayName": "恶魔轮盘",
+    "consoleClient": "dist/console.js"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check:game": "tsx scripts/check-game.ts"
+    "build:web": "esbuild src/console/client.ts --bundle --format=esm --platform=browser --outfile=dist/console.js",
+    "prepack": "pnpm build:web",
+    "check:game": "tsx scripts/check-game.ts",
+    "check:native": "tsx scripts/check-native.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "cortico": "^0.1.4",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

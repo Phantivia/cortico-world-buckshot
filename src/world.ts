@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ToolDef, ToolOutcome, World, WorldHost, WorldConsoleDecl } from 'cortico/core/types.ts';
+import type { BlobInput, ToolDef, ToolOutcome, World, WorldHost, WorldConsoleDecl } from 'cortico/core/types.ts';
 import type { WorldContext } from 'cortico/world.ts';
 import { nowIso } from 'cortico/core/util.ts';
 import { BuckshotBridge } from './bridge.ts';
@@ -12,6 +12,9 @@ import { prepareImplant } from './implant.ts';
 import { renderSnapshot } from './render.ts';
 import { BUCKSHOT_TOOL_DECLS } from './tools.ts';
 import type { BuckshotObservation, BuckshotSnapshot } from './protocol.ts';
+import { BUCKSHOT_PANEL_DECLS } from './console/panels.ts';
+import type { BuckshotGameState } from './console/types.ts';
+import { describeObservation, describeEnvironment, frameKey } from './events.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -26,6 +29,11 @@ export class BuckshotWorld implements World {
   private eventTail = Promise.resolve();
   private lastActions = '';
   private lastOutcome: string | undefined;
+  private lastFrameKey = '';
+  private frameTimer: NodeJS.Timeout | null = null;
+  private framePending: Promise<void> | null = null;
+  private lastFrameAtMs = 0;
+  private frameReason = '';
 
   constructor(private readonly ctx: WorldContext<BuckshotConfigSection>) {}
 
@@ -66,12 +74,28 @@ export class BuckshotWorld implements World {
 
   console(): WorldConsoleDecl {
     return {
-      label: '恶魔轮盘', config: [BUCKSHOT_CONFIG_GROUP],
+      label: '恶魔轮盘', config: [BUCKSHOT_CONFIG_GROUP], panels: [...BUCKSHOT_PANEL_DECLS],
+      invoke: async (panel, method) => {
+        if (panel !== 'game') throw new Error('未知面板。');
+        if (method === 'start') await this.startGame();
+        else if (method === 'stop') await this.stopGame();
+        else if (method === 'capture') {
+          const reply = await this.request('capture', {});
+          if (!reply.ok || !reply.png) throw new Error(reply.detail);
+          return { $binary: { mime: 'image/png', base64: reply.png } };
+        } else if (method !== 'state') throw new Error('未知操作。');
+        return this.gameState();
+      },
       lamps: [{ label: '游戏桥', state: this.state, hint: this.error || undefined }],
       badges: [{ label: '游戏', value: this.bridge?.snapshot?.scene ?? '未启动', tone: this.state === 'online' ? 'on' : 'off' }],
       promptDocs: [{ key: 'worlds.buckshot.envPrompt', title: '恶魔轮盘 · 环境提示词', description: '游戏工具与可见信息的使用规则。', path: ENV_PROMPT_FILE,
         deploymentPath: join(this.ctx.botDir, 'worlds', 'buckshot', 'ENV_PROMPT.md'), role: 'envPrompt', vars: [{ name: 'buckshot.status', description: '当前游戏状态。', multiline: true }] }],
     };
+  }
+
+  private gameState(): BuckshotGameState {
+    const snapshot = this.bridge?.snapshot;
+    return { state: this.state, error: this.error, stoppable: this.game !== null || this.starting !== null, scene: snapshot?.scene, mode: snapshot?.mode, round: snapshot?.round };
   }
 
   async start(host: WorldHost): Promise<void> {
@@ -81,6 +105,9 @@ export class BuckshotWorld implements World {
 
   async stop(): Promise<void> {
     if (this.starting) await this.starting.catch(() => undefined);
+    if (this.frameTimer) clearTimeout(this.frameTimer);
+    this.frameTimer = null;
+    this.frameReason = '';
     if (this.ctx.cfg.closeOnStop) await this.stopGame();
     else { await this.bridge?.stop(); this.bridge = null; this.game = null; this.state = 'offline'; }
     await this.eventTail;
@@ -115,7 +142,11 @@ export class BuckshotWorld implements World {
       const bridge = new BuckshotBridge();
       this.bridge = bridge;
       bridge.on('snapshot', (snapshot: BuckshotSnapshot) => this.onSnapshot(snapshot));
-      bridge.on('observation', (event: BuckshotObservation) => { void this.emit(event.kind, JSON.stringify(event.facts)); });
+      bridge.on('observation', (event: BuckshotObservation) => {
+        const text = describeObservation(event);
+        void this.emit(event.kind, text);
+        if (['shot', 'reveal', 'revival', 'result', 'dialogue'].includes(event.kind)) this.scheduleFrame(text);
+      });
       bridge.on('fault', (error: Error) => { this.state = 'error'; this.error = error.message; void this.emit('error', error.message); });
       bridge.on('disconnected', () => { if (this.bridge === bridge) { this.state = 'offline'; void this.emit('disconnected', '游戏事件桥已断开。'); } });
       const port = await bridge.start();
@@ -137,7 +168,9 @@ export class BuckshotWorld implements World {
         signal?.addEventListener('abort', onAbort, { once: true });
         bridge.once('connected', onConnected);
         bridge.once('fault', onFault);
-        this.game = spawn(executableFile, ['--main-pack', packFile, '--', `--cortico-executable=${executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`], { cwd: dirname(executableFile), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        const displayArgs = this.ctx.cfg.display.screenIndex === null ? [] : ['--screen', String(this.ctx.cfg.display.screenIndex)];
+        if (this.ctx.cfg.display.muteAudio) displayArgs.push('--audio-driver', 'Dummy');
+        this.game = spawn(executableFile, [...displayArgs, '--main-pack', packFile, '--', `--cortico-executable=${executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`], { cwd: dirname(executableFile), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
         this.game.once('error', onFault);
         this.game.on('error', (error) => { log.end(); this.host?.log.error(`Buckshot game process failed: ${error.message}`); });
         this.game.once('exit', onExit);
@@ -156,6 +189,11 @@ export class BuckshotWorld implements World {
   }
 
   async stopGame(): Promise<void> {
+    if (this.frameTimer) clearTimeout(this.frameTimer);
+    this.frameTimer = null;
+    this.frameReason = '';
+    this.lastFrameKey = '';
+    this.lastFrameAtMs = 0;
     const bridge = this.bridge;
     const game = this.game;
     this.bridge = null;
@@ -171,7 +209,7 @@ export class BuckshotWorld implements World {
   }
 
   private onSnapshot(snapshot: BuckshotSnapshot): void {
-    const signature = JSON.stringify(snapshot.actions);
+    const signature = JSON.stringify({ actions: snapshot.actions, scene: snapshot.scene, menu: snapshot.menu, mode: snapshot.mode, round: snapshot.round, outcome: snapshot.outcome, cash: snapshot.cash, view: snapshot.view, activeSeat: snapshot.activeSeat, turnOrder: snapshot.turnOrder, jammerSelection: snapshot.jammerSelection });
     if (signature !== this.lastActions) {
       this.lastActions = signature;
       void this.emit('state', renderSnapshot(snapshot));
@@ -180,11 +218,39 @@ export class BuckshotWorld implements World {
       this.lastOutcome = snapshot.outcome;
       if (snapshot.outcome === 'won') void this.emit('victory', renderSnapshot(snapshot));
     }
+    const key = frameKey(snapshot);
+    if (key !== this.lastFrameKey) {
+      this.lastFrameKey = key;
+      if (snapshot.scene !== 'loading') this.scheduleFrame(describeEnvironment(snapshot));
+    }
   }
 
-  private emit(kind: string, text: string): Promise<void> {
+  private scheduleFrame(reason: string): void {
+    if (!this.ctx.cfg.screenshotEvents.enabled || !this.bridge) return;
+    this.frameReason = reason;
+    if (this.frameTimer || this.framePending) return;
+    const delay = Math.max(150, this.lastFrameAtMs + this.ctx.cfg.screenshotEvents.minIntervalMs - Date.now());
+    this.frameTimer = setTimeout(() => {
+      this.frameTimer = null;
+      const bridge = this.bridge;
+      if (!bridge || !this.ctx.cfg.screenshotEvents.enabled) return;
+      const reason = this.frameReason;
+      this.frameReason = '';
+      this.framePending = (async () => {
+        const reply = await bridge.request('capture', {}, this.ctx.cfg.actionTimeoutMs);
+        if (this.bridge !== bridge || !reply.ok || !reply.png) return;
+        this.lastFrameAtMs = Date.now();
+        await this.emit('frame', `${reason}\n截图为当前渲染帧。${bridge.snapshot ? `\n${renderSnapshot(bridge.snapshot)}` : ''}`, [{ bytes: Buffer.from(reply.png, 'base64'), mime: 'image/png', name: 'buckshot.png', fallbackText: '恶魔轮盘当前画面' }]);
+      })().catch((error) => { if (this.bridge === bridge) this.host?.log.warn(`Buckshot frame event failed: ${String(error)}`); }).finally(() => {
+        this.framePending = null;
+        if (this.frameReason && this.bridge === bridge) this.scheduleFrame(this.frameReason);
+      });
+    }, delay);
+  }
+
+  private emit(kind: string, text: string, blobs?: BlobInput[]): Promise<void> {
     this.eventTail = this.eventTail.then(async () => {
-      await this.host?.pushEvent({ type: `buckshot.${kind}`, source: this.id, senderKey: this.id, ts: nowIso(this.ctx.timezone), text }, { trigger: kind === 'state' || kind === 'victory' ? 'flush' : 'debounce' });
+      await this.host?.pushEvent({ type: `buckshot.${kind}`, source: this.id, senderKey: this.id, ts: nowIso(this.ctx.timezone), text, ...(blobs ? { blobs } : {}) }, { trigger: kind === 'state' || kind === 'victory' ? 'flush' : 'debounce' });
     }).catch((error) => { this.host?.log.error(`Buckshot event delivery failed: ${String(error)}`); });
     return this.eventTail;
   }

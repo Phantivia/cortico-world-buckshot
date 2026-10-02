@@ -17,14 +17,14 @@ describe('World contract', () => {
     expect(world.console!().config).toEqual([BUCKSHOT_CONFIG_GROUP]);
     for (const path of Object.keys(BUCKSHOT_CONFIG_GROUP.schema.properties)) {
       expect(path.startsWith(`worlds.${BUCKSHOT.id}.`)).toBe(true);
-      expect(ctx.cfg).toHaveProperty(path.split('.').at(-1)!);
+      expect(ctx.cfg).toHaveProperty(path.slice(`worlds.${BUCKSHOT.id}.`.length));
     }
   });
   it('keeps definitions independent between deployments', () => {
     const first = BUCKSHOT.defaults(); first.executableFile = 'configured';
     expect(BUCKSHOT.defaults()).toEqual(BUCKSHOT_DEFAULTS);
   });
-  it('allows the agent to launch and operate the entire game through declared tools', () => {
+  it('serializes player actions and declares read observations', () => {
     const world = BUCKSHOT.create(context());
     const tools = world.tools();
     expect(new Set(tools.map((tool) => tool.name)).size).toBe(tools.length);

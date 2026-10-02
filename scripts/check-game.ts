@@ -10,7 +10,9 @@ import { renderSnapshot } from '../src/render.ts';
 
 const args = process.argv.slice(2);
 const executableFile = args.find((value) => !value.startsWith('--'));
-if (!executableFile) throw new Error('Usage: pnpm check:game <Buckshot Roulette.exe> [--launch] [--headless] [--runtime-dir=<directory>]');
+if (!executableFile) throw new Error('Usage: pnpm check:game <Buckshot Roulette.exe> [--launch] [--headless] [--mute] [--screen=<index>] [--runtime-dir=<directory>]');
+const screen = args.find(value => value.startsWith('--screen='))?.slice('--screen='.length);
+if (screen !== undefined && !/^\d+$/.test(screen)) throw new Error('Screen index must be a nonnegative integer');
 await verifyInstallation(executableFile);
 console.log(`Verified ${BUCKSHOT_PROFILE.id}`);
 if (args.includes('--launch')) {
@@ -23,7 +25,10 @@ if (args.includes('--launch')) {
   log.on('error', (error) => console.error(error.message));
   const connected = once(bridge, 'connected');
   const fault = new Promise<never>((_, reject) => bridge.once('fault', reject));
-  const game = spawn(executableFile, [...(args.includes('--headless') ? ['--headless'] : ['--windowed']), '--main-pack', packFile, '--', `--cortico-executable=${executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`], { cwd: dirname(executableFile), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const displayArgs = args.includes('--headless') ? ['--headless'] : ['--windowed'];
+  if (args.includes('--mute')) displayArgs.push('--audio-driver', 'Dummy');
+  if (screen !== undefined) displayArgs.push('--screen', screen);
+  const game = spawn(executableFile, [...displayArgs, '--main-pack', packFile, '--', `--cortico-executable=${executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`], { cwd: dirname(executableFile), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   game.stdout?.pipe(log, { end: false }); game.stderr?.pipe(log, { end: false });
   const failed = new Promise<never>((_, reject) => { game.once('error', reject); game.once('exit', (code) => reject(new Error(`Game exited: ${code}`))); });
   let timer: NodeJS.Timeout | undefined;

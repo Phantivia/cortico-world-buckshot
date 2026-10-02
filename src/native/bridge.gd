@@ -13,14 +13,18 @@ var token = ""
 var load_number = 0
 var shells = {}
 var health = {"player": null, "dealer": null}
-var observations = []
 var observation_number = 0
 var latest_snapshot = {}
 var held_actions = {}
 var held_keys = {}
+var held_buttons = {}
+var held_controller_buttons = {}
+var held_controller_axes = {}
 var controls = []
 var scene_id = 0
 var seat_health = {}
+var outcome = {}
+var multiplayer_status = {}
 
 func _init():
 	for arg in OS.get_cmdline_user_args():
@@ -68,7 +72,11 @@ func First(file):
 
 func _process(delta):
 	peer.poll()
-	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED: return
+	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+		if greeted:
+			ReleaseInputs()
+			greeted = false
+		return
 	if !greeted:
 		Send({"kind": "hello", "protocol": 1, "token": token, "pid": OS.get_process_id(), "version": get_node("/root/GlobalVariables").version_to_check})
 		greeted = true
@@ -94,6 +102,10 @@ func _process(delta):
 		if Time.get_ticks_msec() >= held_keys[key]:
 			KeyEvent(key, false)
 			held_keys.erase(key)
+	for button in held_buttons.keys():
+		if Time.get_ticks_msec() >= held_buttons[button].until:
+			MouseEvent(held_buttons[button].position, button, false)
+			held_buttons.erase(button)
 
 func Send(message):
 	if peer.get_status() == StreamPeerTCP.STATUS_CONNECTED:
@@ -102,12 +114,11 @@ func Send(message):
 func Record(event_kind, facts):
 	observation_number += 1
 	var event = {"number": observation_number, "kind": event_kind, "facts": facts}
-	observations.append(event)
 	Send({"kind": "observation", "event": event})
 
 func ObserveLoad(live, blank):
 	load_number += 1
-	shells = {"load": load_number, "initialLive": live, "initialBlank": blank, "consumed": 0, "known": {}, "inversions": []}
+	shells = {"load": load_number, "initialLive": live, "initialBlank": blank, "consumed": 0, "known": {}, "inversions": [], "ejected": []}
 	Record("load", {"load": load_number, "live": live, "blank": blank})
 
 func ObserveReveal(index, shell, reason):
@@ -118,16 +129,18 @@ func ObserveReveal(index, shell, reason):
 
 func ObserveEjection(shell, dealer):
 	if shells.is_empty(): return
-	Record("ejection", {"load": load_number, "ordinal": shells.consumed + 1, "shell": shell, "actor": ("dealer" if dealer else "player") if dealer is bool else dealer})
+	var facts = {"load": load_number, "ordinal": shells.consumed + 1, "shell": shell, "actor": ("dealer" if dealer else "player") if dealer is bool else dealer}
+	shells.ejected.append(facts.duplicate())
+	Record("ejection", facts)
 	shells.known.erase(str(shells.consumed))
 	shells.consumed += 1
 
-func ObserveInverter():
+func ObserveInverter(actor = "player"):
 	if shells.is_empty(): return
 	var key = str(shells.consumed)
 	if shells.known.has(key): shells.known[key] = "blank" if shells.known[key] == "live" else "live"
 	shells.inversions.append(shells.consumed + 1)
-	Record("inversion", {"load": load_number, "ordinal": shells.consumed + 1})
+	Record("inversion", {"load": load_number, "ordinal": shells.consumed + 1, "actor": actor})
 
 func ObserveHealth(player, dealer):
 	health = {"player": player, "dealer": dealer}
@@ -136,6 +149,35 @@ func ObserveHealth(player, dealer):
 func ObserveSeatHealth(seat, value):
 	seat_health[str(seat)] = value
 	Record("health", {"seat": seat, "value": value})
+
+func ObserveOutcome(result, cash = null):
+	outcome = {"outcome": result}
+	if cash != null: outcome["cash"] = cash
+	Record("result", outcome.duplicate())
+
+func ObserveShot(actor, target, shell):
+	Record("shot", {"actor": actor, "target": target, "shell": shell})
+
+func ObserveItem(actor, item_id, resources):
+	for resource in resources:
+		if resource.id == item_id:
+			Record("item", {"actor": actor, "item": resource.name})
+			return
+
+func ObserveDialogue(label):
+	if Visible(label) and label.text != "": Record("dialogue", {"text": DisplayText(label)})
+
+func ObserveRound(index):
+	multiplayer_status["round"] = index + 1
+	Record("round", {"round": index + 1})
+
+func ObserveTurn(seat):
+	multiplayer_status["activeSeat"] = seat
+	Record("turn", {"seat": seat})
+
+func ObserveTurnOrder(direction):
+	multiplayer_status["turnOrder"] = direction
+	Record("turnorder", {"direction": direction})
 
 func ObserveLocalReveal(shell, mesh):
 	var current_load = load_number
@@ -149,14 +191,11 @@ func ObserveLocalReveal(shell, mesh):
 
 func Visible(node):
 	if !is_instance_valid(node) or !node.is_inside_tree(): return false
-	if node is CanvasItem:
-		if !node.is_visible_in_tree(): return false
-		var parent = node
-		while parent is CanvasItem:
-			if parent.modulate.a == 0: return false
-			parent = parent.get_parent()
-		return true
-	if node is Node3D: return node.is_visible_in_tree()
+	var parent = node
+	while parent != null:
+		if parent is CanvasItem and (!parent.is_visible_in_tree() or parent.modulate.a == 0): return false
+		if parent is Node3D and !parent.is_visible_in_tree(): return false
+		parent = parent.get_parent()
 	return true
 
 func ColliderAvailable(parent):
@@ -176,10 +215,22 @@ func AddTarget(node, label, target_kind, extra = {}):
 func ButtonLabel(button, controller):
 	var alias = controller.get("alias")
 	if alias is String and alias != "": return alias
-	if button is Button and button.text != "": return button.text
+	if button is Button and button.text != "": return DisplayText(button)
 	for child in button.get_children():
-		if child is Label and child.text != "": return child.text
+		if child is Label and child.text != "": return DisplayText(child)
 	return button.name
+
+func DisplayText(node):
+	return node.tr(node.text) if !(node is Control) or node.auto_translate else node.text
+
+func Caption(node):
+	if !is_instance_valid(node) or !Visible(node): return ""
+	if node is Label: return DisplayText(node)
+	var parts = []
+	for child in node.get_children():
+		var text = Caption(child)
+		if text != "": parts.append(text)
+	return " / ".join(parts)
 
 func Snapshot():
 	targets.clear()
@@ -190,6 +241,8 @@ func Snapshot():
 		shells = {}
 		health = {"player": null, "dealer": null}
 		seat_health = {}
+		outcome = {}
+		multiplayer_status = {}
 	var scene_name = scene.scene_file_path.get_file().get_basename() if scene != null else "loading"
 	var actions = []
 	var inventory = []
@@ -197,34 +250,44 @@ func Snapshot():
 	var inter = First("InteractionManager.gd")
 	var menu = First("MenuManager.gd")
 	var local_player = null
+	var active_jammer = null
 	var handled_buttons = {}
 	for player in Nodes("MP_UserInstanceProperties.gd"):
 		if player.is_active: local_player = player
-	for file in ["ButtonClass.gd", "ButtonClass_Main.gd", "MP_ButtonClassMain.gd"]:
+	for file in ["ButtonClass.gd", "ButtonClass_Main.gd", "MP_ButtonClassMain.gd", "MP_ButtonClass.gd"]:
 		for controller in Nodes(file):
 			var button = controller.get_parent()
-			if !(button is BaseButton) or !button.is_visible_in_tree() or button.disabled or button.mouse_filter == Control.MOUSE_FILTER_IGNORE: continue
+			if !(button is BaseButton) or !button.is_visible_in_tree() or !Visible(button.get_parent()) or button.disabled or button.mouse_filter == Control.MOUSE_FILTER_IGNORE: continue
 			if file == "MP_ButtonClassMain.gd":
-				if !controller.is_active or controller.is_emulating_mouse_in_main: continue
+				if controller.is_emulating_mouse_in_main: continue
 				if !controller.is_lobby_scene and local_player == null: continue
-				if controller.ui != null and !Visible(controller.ui): continue
-				if controller.ui_3D != null and !Visible(controller.ui_3D): continue
 			else:
 				if !controller.isActive or !controller.mainActive: continue
-				if file == "ButtonClass.gd" and !Visible(controller.ui): continue
+				if file == "MP_ButtonClass.gd" and !controller.properties.is_active: continue
 				if file == "ButtonClass_Main.gd" and !Visible(controller.ui_3D if controller.is3D else controller.ui): continue
 				if file == "ButtonClass_Main.gd" and (controller.overridingMouseRaycast or controller.usingInteractionBranch): continue
 			if main_cursor != null and !main_cursor.cursor_visible: continue
 			var label = ButtonLabel(button, controller)
 			var sub_alias = controller.get("sub_alias")
 			if sub_alias is String and sub_alias != "": label += " " + sub_alias
-			actions.append(AddTarget(controller, label, "button"))
+			var ui = controller.get("ui_element_to_affect") if file == "MP_ButtonClassMain.gd" else controller.get("ui")
+			var caption = Caption(ui)
+			if file == "MP_ButtonClassMain.gd" and controller.is_related_to_customization:
+				var customization = controller.get_child(0)
+				label = customization.alias
+				if customization.item_properties != null:
+					var row = customization.item_properties
+					if row.is_sequence:
+						caption = " / ".join([Caption(row.label_sequence_number), Caption(row.label_number_of_blanks), Caption(row.label_number_of_lives), Caption(row.label_number_of_items)])
+					else:
+						caption = Caption(row.label_item_name) + "；每位玩家 " + Caption(row.label_max_per_player) + "；桌面上限 " + Caption(row.label_max_on_table) + "；启用 " + str(Visible(row.checkmark_ingame))
+			actions.append(AddTarget(controller, label, "button", {"caption": caption} if caption != "" else {}))
 			handled_buttons[button.get_instance_id()] = true
 			if file == "MP_ButtonClassMain.gd":
-				if controller.right_click_enabled: actions.append(AddTargetOperation(controller, label + " (right click)", "right click"))
+				if controller.right_click_enabled: actions.append(AddTargetOperation(controller, label + " (right click)", "right click", caption))
 				if controller.mouse_wheel_enabled:
-					actions.append(AddTargetOperation(controller, label + " (wheel up)", "wheel up"))
-					actions.append(AddTargetOperation(controller, label + " (wheel down)", "wheel down"))
+					actions.append(AddTargetOperation(controller, label + " (wheel up)", "wheel up", caption))
+					actions.append(AddTargetOperation(controller, label + " (wheel down)", "wheel down", caption))
 	var valid_controls = []
 	for control in controls:
 		if !is_instance_valid(control): continue
@@ -234,7 +297,7 @@ func Snapshot():
 			if handled_buttons.has(control.get_instance_id()) or control.disabled: continue
 			# Transparent hitboxes are described by their scripted controller.
 			if control.modulate.a == 0 or control.self_modulate.a == 0: continue
-			actions.append(AddTarget(control, control.text if control is Button and control.text != "" else control.name, "control"))
+			actions.append(AddTarget(control, DisplayText(control) if control is Button and control.text != "" else control.name, "control"))
 		elif control is Slider:
 			if control.editable: actions.append(AddTarget(control, control.name, "slider", {"value": control.value, "minimum": control.min_value, "maximum": control.max_value, "step": control.step}))
 		elif control.editable: actions.append(AddTarget(control, control.name, "text field"))
@@ -266,10 +329,19 @@ func Snapshot():
 			if !local_player.major_permission_enabled or local_player.camera_look.looking_active: continue
 			if !local_player.cursor.cursor_visible or !branch.interactionAllowed or branch.interactionInvalid or branch.interactionInspecting or !ColliderAvailable(branch.get_parent()): continue
 			var label = branch.itemName if branch.itemName != "" else branch.interactionAlias
-			if branch.interactionAlias == "hover pan object": label = "shoot seat " + str(branch.socket_number)
+			var side = str(branch.socket_number)
+			if branch.interactionAlias == "hover pan object":
+				side = str(branch.properties.socket_number)
+				label = "shoot seat " + side
 			if branch.interactionAlias == "item grid": label = "place item in slot " + str(branch.grid_index + 1)
-			if branch.interactionAlias == "jammer button": label = "jam seat " + str(branch.socket_number)
-			actions.append(AddTarget(branch, label, "multiplayer interaction", {"side": str(branch.socket_number), "slot": branch.local_grid_index + 1}))
+			if branch.interactionAlias == "jammer button":
+				active_jammer = branch.get_parent().get_child(0).jammer
+				if branch.interactionAlias_sub == "confirm":
+					label = "jam confirm"
+				else:
+					side = str(local_player.GetSocketFromDirection(local_player.socket_number, branch.interactionAlias_sub))
+					label = "jam seat " + side
+			actions.append(AddTarget(branch, label, "multiplayer interaction", {"side": side, "slot": branch.local_grid_index + 1}))
 	if menu != null and menu.viewing_intro: actions.append(AddTarget(menu, "skip intro", "skip intro"))
 	var ending = First("EndingManager.gd")
 	if ending != null and ending.waitingForInput: actions.append(AddTarget(ending, "continue after ending", "continue"))
@@ -280,45 +352,53 @@ func Snapshot():
 	for label in labels:
 		if !is_instance_valid(label): continue
 		valid_labels.append(label)
-		if !Visible(label) or label.text == "": continue
+		if !Visible(label) or label.text == "" or (label is Label and label.self_modulate.a == 0): continue
 		if label is Label3D:
 			var camera = get_viewport().get_camera_3d()
 			if camera == null or camera.is_position_behind(label.global_position): continue
 			if !get_viewport().get_visible_rect().has_point(camera.unproject_position(label.global_position)): continue
-		var text = label.text
+		var text = DisplayText(label)
 		if label.visible_characters >= 0: text = text.left(label.visible_characters)
 		if text != "" and !texts.has(text): texts.append(text)
 	labels = valid_labels
 	var status = {"scene": scene_name, "actions": actions, "inventory": inventory, "texts": texts, "shells": shells.duplicate(true), "health": health.duplicate(), "observationNumber": observation_number}
+	var camera = First("CameraManager.gd")
+	if camera != null and camera.activeSocket != null: status["view"] = camera.activeSocket
 	if menu != null: status["menu"] = menu.currentScreen
 	var round_manager = First("RoundManager.gd")
 	if round_manager != null and round_manager.playerData.hasSignedWaiver:
 		status["round"] = round_manager.playerData.currentBatchIndex + 1
 		status["mode"] = "double or nothing" if round_manager.endless else "story"
-		status["dealerCuffed"] = round_manager.dealerCuffed
-		status["playerCuffed"] = round_manager.playerCuffed
-		status["barrelSawedOff"] = round_manager.barrelSawedOff
+		if main_cursor != null and main_cursor.cursor_visible:
+			status["dealerCuffed"] = round_manager.dealerCuffed
+			status["playerCuffed"] = round_manager.playerCuffed
+			status["barrelSawedOff"] = round_manager.barrelSawedOff
 		if round_manager.intbranch_yes.interactionAllowed: status["cash"] = round_manager.endscore
 	var cutter = First("DefibCutter.gd")
 	if cutter != null:
 		if cutter.displayBroken_player: status.health.player = null
 		if cutter.displayBroken_dealer: status.health.dealer = null
-	if ending != null and Visible(ending.uiparent) and Visible(ending.label_congrats): status["outcome"] = "won"; status["cash"] = ending.cash_gl
+	status.merge(outcome)
 	if local_player != null:
 		status["localSeat"] = local_player.socket_number
 		status["mode"] = "multiplayer"
+		status.merge(multiplayer_status)
 		status["players"] = []
 		for player in Nodes("MP_UserInstanceProperties.gd"):
 			status.players.append({"seat": player.socket_number, "name": player.user_name, "health": seat_health.get(str(player.socket_number))})
 		status["freeLook"] = local_player.camera_look.looking_active
+		status["view"] = local_player.cam.activeSocket
+		if active_jammer != null:
+			var selected = active_jammer.selected_target_index
+			status["jammerSelection"] = {"seat": local_player.GetSocketFromDirection(local_player.socket_number, active_jammer.target_direction_strings[selected]) if selected >= 0 else null, "light": "green" if active_jammer.selected_target_is_valid else "red"}
 	status["viewport"] = {"width": get_viewport().get_visible_rect().size.x, "height": get_viewport().get_visible_rect().size.y}
 	status["inputActions"] = ["ui_accept", "ui_cancel", "ui_focus_next", "ui_focus_prev", "ui_left", "ui_right", "ui_up", "ui_down", "reset", "exit game", "free look toggle", "right_click2", "scroll_up", "scroll_down"]
 	return status
 
-func AddTargetOperation(node, label, operation):
+func AddTargetOperation(node, label, operation, caption):
 	var id = "t" + str(node.get_instance_id()) + ":" + operation
 	targets[id] = {"node": node, "kind": operation}
-	return {"id": id, "label": label, "kind": operation}
+	return {"id": id, "label": label, "kind": operation, "caption": caption}
 
 func Publish(force = false):
 	var snapshot = Snapshot()
@@ -344,7 +424,7 @@ func Handle(request):
 	match request.get("action", ""):
 		"snapshot":
 			Publish(true)
-			Reply(id, true, "observed", {"snapshot": latest_snapshot, "observations": observations})
+			Reply(id, true, "observed", {"snapshot": latest_snapshot})
 		"act":
 			Publish()
 			var expected = request.get("revision", revision)
@@ -397,6 +477,10 @@ func Handle(request):
 			HoldAction(action, int(request.get("durationMs", 100)))
 			Reply(id, true, "input delivered")
 		"text":
+			if request.get("destination", "field") == "clipboard":
+				DisplayServer.clipboard_set(str(request.get("text", "")))
+				Reply(id, true, "text copied for game paste")
+				return
 			var control = get_viewport().gui_get_focus_owner()
 			if !(control is LineEdit) and !(control is TextEdit):
 				Reply(id, false, "no text field focused")
@@ -421,25 +505,30 @@ func Handle(request):
 			var buttons = {"left": MOUSE_BUTTON_LEFT, "right": MOUSE_BUTTON_RIGHT, "middle": MOUSE_BUTTON_MIDDLE, "wheel up": MOUSE_BUTTON_WHEEL_UP, "wheel down": MOUSE_BUTTON_WHEEL_DOWN}
 			var button = buttons.get(request.get("button", "move"), 0)
 			if button != 0:
+				await get_tree().process_frame
+				await get_tree().process_frame
 				MouseEvent(event.position, button, true)
-				MouseEvent(event.position, button, false)
+				if int(request.get("durationMs", 0)) > 0:
+					held_buttons[button] = {"until": Time.get_ticks_msec() + int(request.durationMs), "position": event.position}
+				else: MouseEvent(event.position, button, false)
 			Reply(id, true, "input delivered")
 		"controller":
 			if request.has("axis"):
-				var event = InputEventJoypadMotion.new()
-				event.axis = int(request.axis)
-				event.axis_value = float(request.get("value", 0))
-				Input.parse_input_event(event)
+				var axis = int(request.axis)
+				var value = float(request.get("value", 0))
+				ControllerAxis(axis, value)
+				if value == 0: held_controller_axes.erase(axis)
+				else: held_controller_axes[axis] = true
 			else:
-				var event = InputEventJoypadButton.new()
-				event.button_index = int(request.get("button", 0))
-				event.pressed = bool(request.get("pressed", true))
-				Input.parse_input_event(event)
+				var button = int(request.get("button", 0))
+				var pressed = bool(request.get("pressed", true))
+				ControllerButton(button, pressed)
+				if pressed: held_controller_buttons[button] = true
+				else: held_controller_buttons.erase(button)
 			Reply(id, true, "input delivered")
 		"capture": Capture(id)
 		"quit":
-			for action in held_actions.keys(): ReleaseAction(action)
-			for key in held_keys.keys(): KeyEvent(key, false)
+			ReleaseInputs()
 			Reply(id, true, "closing owned game")
 			get_tree().quit()
 		_: Reply(id, false, "unknown bridge action")
@@ -471,6 +560,29 @@ func ReleaseAction(action):
 	event.action = action
 	Input.parse_input_event(event)
 	held_actions.erase(action)
+
+func ControllerButton(button, pressed):
+	var event = InputEventJoypadButton.new()
+	event.button_index = button
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+func ControllerAxis(axis, value):
+	var event = InputEventJoypadMotion.new()
+	event.axis = axis
+	event.axis_value = value
+	Input.parse_input_event(event)
+
+func ReleaseInputs():
+	for action in held_actions.keys(): ReleaseAction(action)
+	for key in held_keys.keys(): KeyEvent(key, false)
+	for button in held_buttons.keys(): MouseEvent(held_buttons[button].position, button, false)
+	for button in held_controller_buttons.keys(): ControllerButton(button, false)
+	for axis in held_controller_axes.keys(): ControllerAxis(axis, 0)
+	held_keys.clear()
+	held_buttons.clear()
+	held_controller_buttons.clear()
+	held_controller_axes.clear()
 
 func Capture(id):
 	if DisplayServer.get_name() == "headless":

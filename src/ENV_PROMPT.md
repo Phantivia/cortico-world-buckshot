@@ -1,14 +1,20 @@
-你通过此 World 操作《恶魔轮盘》。游戏规则、动画、随机数和庄家行为由原版游戏执行。
+你通过此 World 操作《恶魔轮盘》。游戏执行规则、动画、随机数和对手行为。事件、观察与截图提供游戏中已经公开的信息。
 
-调用 buckshot_start 启动，buckshot_observe 获取当前状态。每个可操作目标都有 id 和标签；把 id 与同一次观察的 revision 传给 buckshot_act。状态变化时操作会被拒绝，重新观察即可。输入回执说明输入是否送达；动作后等待 buckshot.state 中的新目标。没有目标通常表示动画尚未完成。
+场景从俱乐部厕所与走廊推进到后室：庄家坐在对局桌对面，桌上有霰弹枪、道具和生命计数器。先签免责书，随后在三个轮次中对局，胜出后打开奖金手提箱并领取奖金。剧情通关解锁 Double or Nothing；药瓶进入无尽模式，阶段结算时可加倍继续或收款退出。死亡、除颤器复苏、重开及结算由原版场景推进。
 
-主菜单开始后，依次操作厕所门、后室门和免责书。签名机最多六个字母，选择字母按钮并按 enter；游戏保留禁用名字的规则。领取道具时点击 briefcase intake，再选择空槽；数量由游戏决定。每次选择 shotgun 后，选择 text you 或 text dealer。胜利后打开手提箱的两侧锁扣和箱盖，等结算完成再继续。死亡、复活和重开由游戏场景表示。
+事件描述当前画面环境、镜头转向、枪声、道具动作、计数器、完整字幕和结算。buckshot.frame 附带实际渲染帧；文字概括已观测的事实，画面的光线、表情、物体细节和动画可通过图像查看。需要补看当前画面时调用 buckshot_glance，截图不会产生游戏输入。直播中的反应、评价和解说由你决定。
 
-道具按桌上位置区分。handsaw 加倍下一枪伤害；magnifying glass 揭示当前弹药；beer 弹出一发；cigarettes 恢复一格生命；handcuffs 跳过对方一次行动；expired medicine 有随机损益；inverter 反转当前弹药；burner phone 揭示后续某一发；adrenaline 让你选择庄家的一件道具并使用。不可叠加或不可用的道具不会列为可操作目标。Double or Nothing 在剧情通关解锁后可从厕所药瓶进入，结算时 double yes 继续、double no 领取奖金。
+调用 buckshot_start 启动，buckshot_observe 读取当前状态。每个目标有 id、标签及可选的画面 caption；同名按钮以 caption 区分。把 id 与同次观察的 revision 传给 buckshot_act。状态变化或权限失效时重新观察。回执确认输入送达；动画完成后由新的状态事件显示下一步操作。没有目标时可能正在播放动画，截图仍可查看。
 
-弹药信息只包含装填时公开的实弹与空包弹数量、实际弹出的种类，以及放大镜和电话揭示的具体位置。known 的键是从零开始的本次装填绝对位置；consumed 是已弹出数量。inversions 记录发生过反转的绝对序号，从一开始。结合已发生的事件自行维护剩余数量和概率；未知弹药被反转时不能假定剩余实弹总数仍等于初始实弹数减已弹出的实弹。庄家使用放大镜不会揭示其结果。生命是最近一次计数器显示的值，损坏时标为未知。
+签名机最多六个字母，通过字母目标输入并按 enter；游戏保留禁用名字的规则。领取道具时操作 briefcase intake，再选择空槽。单人选择 shotgun 后选择 text you 或 text dealer。胜利后打开左右锁扣和箱盖，等结算后继续。Double or Nothing 的 double yes 加倍继续，double no 收款。
 
-菜单设置、语言、音量、辅助显示、控制器、排行榜、多人大厅及自定义对局沿用可操作目标。多人对局的观察与操作受本地玩家权限限制。buckshot_input 触发游戏定义的输入动作；常用 ui_cancel、ui_accept、exit game、free look toggle。exit game 按住超过两秒返回主菜单。buckshot_type 填写有焦点的输入框，签名机通过字母目标输入。buckshot_glance 查看实际画面，buckshot_close 关闭游戏。
+桌上道具带所属方和槽位。手锯加倍下一枪伤害；放大镜揭示膛内弹药；啤酒弹出一发；香烟恢复生命；手铐跳过对方行动；过期药有随机损益；逆转器反转膛内弹药；电话揭示后续一发；肾上腺素让你选择对手的一件道具并使用。可用权限由游戏决定。多人还可用干扰器选座后按 jam confirm；观察包含已选座位和确认灯色，绿灯可确认，红灯表示当前选择无效。换向遥控器反转回合方向。
+
+公开弹药记录包含装填的初始数量、弹出记录及实际揭示。known 的键是本次装填从零开始的绝对位置，consumed 是已弹出数量。inversions 和 ejected.ordinal 从一开始。未知弹药发生反转后，不能继续用初始实弹数减去已弹出的实弹来代表剩余实弹数。庄家及其他玩家的私人放大镜、电话结果不会提供给你。生命是最近公开显示的值；计数器损坏或被遮蔽时为未知。
+
+菜单设置、语言、音量、控制器、键位、排行榜、多人大厅及自定义对局通过当前目标操作。多人座位从零开始，localSeat 是你的座位，activeSeat 是当前回合，turnOrder 是方向。道具和射击目标携带座位编号。自由观察期间不会提供桌面点击目标。
+
+buckshot_input 的名称来自 inputActions。ui_cancel 返回界面；单人 exit game 按住超过两秒返回菜单，多人使用该输入打开局内大厅界面；free look toggle 切换自由观察。buckshot_key 发送实际键名，支持重绑。buckshot_pointer 使用 viewport 内坐标，relativeX、relativeY 控制自由观察，支持点击、按住和滚轮。buckshot_controller 的按钮可按下或松开，轴使用 -1 到 1；结束移动后将轴设为 0。buckshot_type 填写有焦点的输入框；destination=clipboard 可设置大厅编号，再操作游戏的粘贴加入按钮。游戏复制的大厅编号由 clipboard 事件提供。Steam 邀请窗口在游戏渲染器之外，需要在线 Steam 客户端。
 
 当前状态：
 {{buckshot.status}}
