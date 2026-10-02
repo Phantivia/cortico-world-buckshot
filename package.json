@@ -1,0 +1,25 @@
+{
+  "name": "cortico-world-buckshot",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Buckshot Roulette game events and player actions for Cortico",
+  "license": "MIT",
+  "keywords": ["cortico-world", "cortico", "buckshot-roulette"],
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@11.5.0",
+  "main": "./src/index.ts",
+  "cortico": { "kind": "world", "api": 5, "displayName": "恶魔轮盘" },
+  "files": ["src", "scripts", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check:game": "tsx scripts/check-game.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.1.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
