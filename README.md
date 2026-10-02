@@ -25,7 +25,7 @@ Buckshot Roulette 的 Cortico World 扩展，契约版本 world 5，支持 Windo
 - `buckshot_type` 填写有焦点的文字框，或写入剪贴板供游戏粘贴大厅编号。
 - `buckshot_glance` 返回游戏渲染器的 PNG，供 bot 主动查看。
 
-`buckshot.state` 描述场景与流程变化。`load`、`shot`、`item`、`reveal`、`ejection`、`inversion`、`health`、`revival`、`dialogue`、`round`、`turn`、`turnorder` 和 `result` 事件使用中文事实描述。字幕在完整显示后投递。
+`buckshot.state` 描述场景与流程变化。`load`、`shot`、`item`、`reveal`、`ejection`、`inversion`、`health`、`revival`、`dialogue`、`round`、`turn`、`turnorder` 和 `result` 事件使用中文事实描述。环境与关键动作附带枪桌、金属器具、声音和道具意象；角色心情与未发生的结果不写入事件。字幕在完整显示后投递。
 
 `buckshot.frame` 附带当前渲染帧及采集时的观察。场景与操作阶段变化、开枪、弹药揭示、复苏、字幕和结算会请求截图；重叠请求合并，默认最短间隔 1500 ms。`screenshotEvents.enabled` 控制自动图像事件，`screenshotEvents.minIntervalMs` 配置间隔。主动截图独立于自动事件开关。无画面模式不支持截图。
 
