@@ -4,7 +4,7 @@ Buckshot Roulette 的 Cortico World 扩展，契约版本 world 5，支持 Windo
 
 ## 接入
 
-在本目录执行 `pnpm install`，从 Cortico 扩展页安装本目录，重启 Cortico。将 `worlds.buckshot.executableFile` 配置为原版 `Buckshot Roulette.exe`，启用 World。挂载后由 `buckshot_start` 启动游戏。
+在本目录执行 `pnpm install`，从 Cortico 扩展页安装本目录，重启 Cortico。启用 World，在恶魔轮盘页的配置里将 `worlds.buckshot.executableFile` 设为原版 `Buckshot Roulette.exe`。激活不检查游戏程序；`buckshot_start` 启动游戏时校验。
 
 启动校验整个程序的 SHA-256；其他版本拒绝植入。构造和扩展检查不需要游戏文件。
 

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BlobInput, ToolDef, ToolOutcome, World, WorldHost, WorldConsoleDecl } from 'cortico/core/types.ts';
@@ -136,6 +136,9 @@ export class BuckshotWorld implements World {
       await this.stopGame();
       this.state = 'loading';
       const executableFile = normalizeExecutableFile(this.ctx.cfg.executableFile);
+      if (!executableFile || !existsSync(executableFile) || !statSync(executableFile).isFile()) {
+        throw new Error(executableFile ? `找不到游戏程序: ${executableFile}` : '未配置游戏程序。在控制台恶魔轮盘页的配置里选择 Buckshot Roulette.exe。');
+      }
       const runtimeDir = this.ctx.cfg.runtimeDir || join(this.ctx.botDir, 'runtimes', 'buckshot');
       const packFile = await prepareImplant(executableFile, runtimeDir);
       signal?.throwIfAborted();
