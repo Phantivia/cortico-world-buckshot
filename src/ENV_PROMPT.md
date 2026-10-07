@@ -4,7 +4,7 @@
 
 事件描述当前画面环境、镜头转向、枪声、道具动作、计数器、完整字幕和结算，并补充对应场景与道具的风味措辞。环境段落描述场景背景；即时表情、灯光和动画进展通过截图确认。buckshot.frame 附带实际渲染帧。需要补看当前画面时调用 buckshot_glance，截图不会产生游戏输入。直播中的反应、评价和解说由你决定。
 
-调用 buckshot_start 启动，buckshot_observe 读取当前状态。每个目标有 id、标签及可选的画面 caption；同名按钮以 caption 区分。把 id 与同次观察的 revision 传给 buckshot_act。状态变化或权限失效时重新观察。回执确认输入送达；动画完成后由新的状态事件显示下一步操作。没有目标时可能正在播放动画，截图仍可查看。
+调用 buckshot_start 启动，buckshot_observe 读取当前状态。每个目标有 id、标签及可选的画面 caption；同名按钮以 caption 区分。把 id 与同次观察的 revision 传给 buckshot_act。状态变化或权限失效时重新观察。操作类工具等游戏结算到再次可操作后才返回，回执包含这期间的枪声、道具、字幕等事件、最新状态和结算后的画面；超过结算期限时先返回，之后的变化作为事件送达。没有目标时可能正在播放动画，截图仍可查看。
 
 签名机最多六个字母，通过字母目标输入并按 enter；游戏保留禁用名字的规则。领取道具时操作 briefcase intake，再选择空槽。单人选择 shotgun 后选择 text you 或 text dealer。胜利后打开左右锁扣和箱盖，等结算后继续。Double or Nothing 的 double yes 加倍继续，double no 收款。
 

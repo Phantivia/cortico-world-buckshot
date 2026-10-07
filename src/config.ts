@@ -7,13 +7,14 @@ export interface BuckshotConfigSection {
   closeOnStop: boolean;
   startupTimeoutMs: number;
   actionTimeoutMs: number;
+  settleTimeoutMs: number;
   screenshotEvents: { enabled: boolean; minIntervalMs: number };
   display: { screenIndex: number | null; muteAudio: boolean };
 }
 
 export const BUCKSHOT_DEFAULTS: BuckshotConfigSection = {
   enabled: false, executableFile: '', runtimeDir: '', closeOnStop: true,
-  startupTimeoutMs: 30000, actionTimeoutMs: 10000,
+  startupTimeoutMs: 30000, actionTimeoutMs: 10000, settleTimeoutMs: 30000,
   screenshotEvents: { enabled: true, minIntervalMs: 1500 },
   display: { screenIndex: null, muteAudio: false },
 };
@@ -26,6 +27,7 @@ export const BUCKSHOT_CONFIG_GROUP: ConfigGroup = {
       'worlds.buckshot.closeOnStop': { type: 'boolean', title: 'World 停止时关闭游戏', 'x-hot': false },
       'worlds.buckshot.startupTimeoutMs': { type: 'integer', title: '等待游戏连接', minimum: 1000, 'x-suffix': 'ms', 'x-hot': false },
       'worlds.buckshot.actionTimeoutMs': { type: 'integer', title: '等待操作回执', minimum: 1000, 'x-suffix': 'ms', 'x-hot': true },
+      'worlds.buckshot.settleTimeoutMs': { type: 'integer', title: '动作结算期限', description: '操作后等游戏回到可操作状态的最长时间；超过后先返回回执，之后的变化作为事件送达。', minimum: 1000, 'x-suffix': 'ms', 'x-hot': true },
       'worlds.buckshot.screenshotEvents.enabled': { type: 'boolean', title: '自动投递关键画面', 'x-hot': true },
       'worlds.buckshot.screenshotEvents.minIntervalMs': { type: 'integer', title: '截图最短间隔', minimum: 500, 'x-suffix': 'ms', 'x-hot': true },
       'worlds.buckshot.display.screenIndex': { type: 'integer', title: '显示器编号', minimum: 0, nullable: true, description: '从 0 开始；留空由游戏选择。', 'x-hot': false },

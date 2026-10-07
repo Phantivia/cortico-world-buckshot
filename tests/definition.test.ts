@@ -29,7 +29,7 @@ describe('World contract', () => {
     const tools = world.tools();
     expect(new Set(tools.map((tool) => tool.name)).size).toBe(tools.length);
     const act = tools.find((tool) => tool.name === 'buckshot_act')!;
-    expect(act.barrierAfter).toBe(true); expect(act.endsTurn).toBe(true);
+    expect(act.barrierAfter).toBe(true); expect(act.endsTurn).toBeUndefined();
     expect(tools.map((tool) => tool.name)).toContain('buckshot_start');
     expect(tools.map((tool) => tool.name)).toContain('buckshot_observe');
   });

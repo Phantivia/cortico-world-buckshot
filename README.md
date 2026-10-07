@@ -20,7 +20,7 @@ Buckshot Roulette 的 Cortico World 扩展，契约版本 world 5，支持 Windo
 
 - `buckshot_start` 启动；`buckshot_close` 关闭本 World 启动的进程。
 - `buckshot_observe` 返回环境、镜头目标、画面文字、生命显示、道具、公开弹药信息和操作目标。
-- `buckshot_act` 使用目标 id 与同次观察的 revision 操作。版本或权限变化时拒绝输入；回执确认送达，后续事件描述结果。
+- `buckshot_act` 使用目标 id 与同次观察的 revision 操作。版本或权限变化时拒绝输入。操作类工具（act、input、key、pointer、controller）不结束本轮，等游戏回到可操作状态或对局结果变化后返回（`src/settle.ts`），这期间的观察写进回执、不另发事件，回执附结算后的画面；超过 `settleTimeoutMs`（默认 30 秒）先返回，之后的变化作为事件送达。
 - `buckshot_input` 触发游戏输入动作；`buckshot_key`、`buckshot_pointer` 和 `buckshot_controller` 发送键盘、鼠标和手柄输入。
 - `buckshot_type` 填写有焦点的文字框，或写入剪贴板供游戏粘贴大厅编号。
 - `buckshot_glance` 返回游戏渲染器的 PNG，供 bot 主动查看。

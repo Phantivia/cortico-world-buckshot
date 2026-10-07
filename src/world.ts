@@ -15,6 +15,7 @@ import type { BuckshotObservation, BuckshotSnapshot } from './protocol.ts';
 import { BUCKSHOT_PANEL_DECLS } from './console/panels.ts';
 import type { BuckshotGameState } from './console/types.ts';
 import { describeObservation, describeEnvironment, frameKey } from './events.ts';
+import { Settlement } from './settle.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -34,6 +35,8 @@ export class BuckshotWorld implements World {
   private framePending: Promise<void> | null = null;
   private lastFrameAtMs = 0;
   private frameReason = '';
+  /** While an input waits for its settlement: the observations go into its receipt instead of events. */
+  private settling: { observations: string[] } | null = null;
 
   constructor(private readonly ctx: WorldContext<BuckshotConfigSection>) {}
 
@@ -64,8 +67,7 @@ export class BuckshotWorld implements World {
             if (action === 'input' && (typeof args.name !== 'string' || (args.durationMs !== undefined && (!Number.isInteger(args.durationMs) || Number(args.durationMs) < 1 || Number(args.durationMs) > 5000)))) throw new Error('输入名称或持续时间无效。');
             if (action === 'key' && (typeof args.key !== 'string' || (args.durationMs !== undefined && (!Number.isInteger(args.durationMs) || Number(args.durationMs) < 1 || Number(args.durationMs) > 5000)))) throw new Error('按键或持续时间无效。');
             if (action === 'pointer' && (!Number.isFinite(args.x) || !Number.isFinite(args.y) || Number(args.x) < 0 || Number(args.y) < 0)) throw new Error('鼠标坐标无效。');
-            const reply = await this.request(action, args, context.signal);
-            return { text: `${reply.detail}${reply.snapshot ? `\n${renderSnapshot(reply.snapshot)}` : ''}`, ...(!reply.ok ? { failed: true as const } : {}) };
+            return await this.input(action, args, context.signal);
           }
         }
       } catch (error) { return { text: error instanceof Error ? error.message : String(error), failed: true }; }
@@ -114,6 +116,54 @@ export class BuckshotWorld implements World {
     this.host = null;
   }
 
+  /**
+   * Sends an input and waits until the game settles (see Settlement) or the settle deadline passes. The receipt carries
+   * what happened meanwhile, the state it settled in and, with screenshot events on, the frame it shows.
+   */
+  private async input(action: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<ToolOutcome> {
+    const bridge = this.bridge;
+    if (!bridge) throw new Error('游戏未启动。调用 buckshot_start。');
+    const settlement = new Settlement(bridge.snapshot);
+    const settling = { observations: [] as string[] };
+    this.settling = settling;
+    try {
+      const reply = await this.request(action, args, signal);
+      if (!reply.ok) return { text: `${reply.detail}${reply.snapshot ? `\n${renderSnapshot(reply.snapshot)}` : ''}`, failed: true };
+      const { snapshot, timedOut } = await this.settle(bridge, settlement, reply.snapshot, signal);
+      const lines = [reply.detail];
+      if (settling.observations.length) lines.push(`这期间：\n${settling.observations.map((text) => `- ${text}`).join('\n')}`);
+      if (timedOut) lines.push(`${this.ctx.cfg.settleTimeoutMs} ms 内游戏还没有回到可操作状态；之后的变化作为事件送达。`);
+      if (snapshot) lines.push(renderSnapshot(snapshot));
+      this.settling = null;
+      if (snapshot) this.onSnapshot(snapshot, false);
+      const frame = this.ctx.cfg.screenshotEvents.enabled && this.bridge === bridge
+        ? await bridge.request('capture', {}, this.ctx.cfg.actionTimeoutMs).catch(() => null) : null;
+      return { text: lines.join('\n'), ...(frame?.ok && frame.png ? { blobs: [{ bytes: Buffer.from(frame.png, 'base64'), mime: 'image/png', name: 'buckshot.png', fallbackText: '恶魔轮盘结算后的画面' }] } : {}) };
+    } finally {
+      if (this.settling === settling) this.settling = null;
+    }
+  }
+
+  private settle(bridge: BuckshotBridge, settlement: Settlement, replied: BuckshotSnapshot | undefined, signal?: AbortSignal): Promise<{ snapshot: BuckshotSnapshot | null; timedOut: boolean }> {
+    if (replied && settlement.snapshot(replied)) return Promise.resolve({ snapshot: replied, timedOut: false });
+    return new Promise((resolve) => {
+      const finish = (timedOut: boolean, snapshot = bridge.snapshot) => {
+        clearTimeout(timer);
+        bridge.off('snapshot', onSnapshot); bridge.off('observation', onObservation); bridge.off('disconnected', onGone);
+        signal?.removeEventListener('abort', onGone);
+        resolve({ snapshot, timedOut });
+      };
+      const onSnapshot = (s: BuckshotSnapshot) => { if (settlement.snapshot(s)) finish(false, s); };
+      const onObservation = () => settlement.observation(bridge.snapshot?.revision ?? 0);
+      const onGone = () => finish(false);
+      const timer = setTimeout(() => finish(true), this.ctx.cfg.settleTimeoutMs);
+      bridge.on('snapshot', onSnapshot);
+      bridge.on('observation', onObservation);
+      bridge.once('disconnected', onGone);
+      signal?.addEventListener('abort', onGone, { once: true });
+    });
+  }
+
   private request(action: string, args: Record<string, unknown>, signal?: AbortSignal) {
     if (!this.bridge) throw new Error('游戏未启动。调用 buckshot_start。');
     return this.bridge.request(action, args, this.ctx.cfg.actionTimeoutMs, signal);
@@ -147,6 +197,7 @@ export class BuckshotWorld implements World {
       bridge.on('snapshot', (snapshot: BuckshotSnapshot) => this.onSnapshot(snapshot));
       bridge.on('observation', (event: BuckshotObservation) => {
         const text = describeObservation(event);
+        if (this.settling) { this.settling.observations.push(text); return; }
         void this.emit(event.kind, text);
         if (['shot', 'reveal', 'revival', 'result', 'dialogue'].includes(event.kind)) this.scheduleFrame(text);
       });
@@ -211,20 +262,23 @@ export class BuckshotWorld implements World {
     this.state = 'offline';
   }
 
-  private onSnapshot(snapshot: BuckshotSnapshot): void {
+  /** A new state: announced as events, unless `announce` is false (an input's receipt already reports it). */
+  private onSnapshot(snapshot: BuckshotSnapshot, announce = true): void {
+    // the input's receipt reports this state once it settles
+    if (this.settling) return;
     const signature = JSON.stringify({ actions: snapshot.actions, scene: snapshot.scene, menu: snapshot.menu, mode: snapshot.mode, round: snapshot.round, outcome: snapshot.outcome, cash: snapshot.cash, view: snapshot.view, activeSeat: snapshot.activeSeat, turnOrder: snapshot.turnOrder, jammerSelection: snapshot.jammerSelection });
     if (signature !== this.lastActions) {
       this.lastActions = signature;
-      void this.emit('state', renderSnapshot(snapshot));
+      if (announce) void this.emit('state', renderSnapshot(snapshot));
     }
     if (snapshot.outcome !== this.lastOutcome) {
       this.lastOutcome = snapshot.outcome;
-      if (snapshot.outcome === 'won') void this.emit('victory', renderSnapshot(snapshot));
+      if (announce && snapshot.outcome === 'won') void this.emit('victory', renderSnapshot(snapshot));
     }
     const key = frameKey(snapshot);
     if (key !== this.lastFrameKey) {
       this.lastFrameKey = key;
-      if (snapshot.scene !== 'loading') this.scheduleFrame(describeEnvironment(snapshot));
+      if (announce && snapshot.scene !== 'loading') this.scheduleFrame(describeEnvironment(snapshot));
     }
   }
 
