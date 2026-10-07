@@ -32,10 +32,10 @@ describe('livestream observations', () => {
   });
   it('reports the selected jammer seat and confirmation light without revealing health', () => {
     const red = { ...snapshot, mode: 'multiplayer', jammerSelection: { seat: 2, light: 'red' as const } };
-    expect(renderSnapshot(red)).toContain('选择座位 2；确认灯红色，当前选择无效');
+    expect(renderSnapshot(red)).toContain('选中座位 2，确认灯红色，当前选择无效');
     const green = { ...red, jammerSelection: { seat: 2, light: 'green' as const } };
     expect(renderSnapshot(green)).toContain('确认灯绿色，可确认');
     expect(frameKey(red)).not.toBe(frameKey(green));
-    expect(renderSnapshot(green)).toContain('生命：你 未知；庄家 未知');
+    expect(renderSnapshot(green)).toContain('生命：你 未知，庄家 未知');
   });
 });

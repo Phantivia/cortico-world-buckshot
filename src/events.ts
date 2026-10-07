@@ -21,6 +21,11 @@ const itemFlavor: Record<string, string> = {
   换向遥控器: '一只遥控器，就能改变整张枪桌的行动方向。',
 };
 
+/** The name the environment prompt uses for a game item; unknown names pass through. */
+export function itemName(value: unknown): string {
+  return items[String(value).toLowerCase()] ?? String(value);
+}
+
 function actor(value: unknown): string {
   return value === 'player' ? '你' : value === 'dealer' ? '庄家' : `座位 ${String(value)}`;
 }
