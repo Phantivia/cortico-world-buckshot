@@ -1,5 +1,7 @@
 # `src/definition.ts`: cortico-world-buckshot
 
+> 此乃直播测试验证之后的world，和其他 Persona / 非直播场景的兼容性有待测试。
+
 Buckshot Roulette 的 Cortico World 扩展，契约版本 world 5，支持 Windows Steam v2.2.0.6。
 
 ## 接入

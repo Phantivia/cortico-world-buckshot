@@ -2,8 +2,13 @@
   "name": "cortico-world-buckshot",
   "version": "0.1.0",
   "type": "module",
-  "description": "Buckshot Roulette game events and player actions for Cortico",
+  "description": "Buckshot Roulette game events and player actions for Cortico. 此乃直播测试验证之后的world，和其他 Persona / 非直播场景的兼容性有待测试。",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Phantivia/cortico-world-buckshot.git"
+  },
+  "homepage": "https://github.com/Phantivia/cortico-world-buckshot#readme",
   "keywords": [
     "cortico-world",
     "cortico",
