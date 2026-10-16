@@ -37,7 +37,7 @@ Buckshot Roulette 的 Cortico World 扩展，契约版本 world 5，支持 Windo
 
 ## 验证
 
-`pnpm test` 验证本地端口、认证、消息分段、断连、回执超时、二进制资源包、直播描述和扩展声明。`pnpm run typecheck` 检查 TypeScript；`pnpm build:web` 构建控制台面板。
+`pnpm test` 验证本地端口、认证、消息分段、断连、回执超时、二进制资源包、直播描述和扩展声明。`pnpm run typecheck` 检查 TypeScript；`pnpm build:web` 构建 WebUI 面板。
 
 `pnpm check:game <exe>` 校验安装，附加 `--launch` 可验证启动与连接；`--mute --screen=1` 选择静音和第二个显示器。`pnpm check:native <exe>` 使用无窗口游戏引擎运行自有场景，验证显示文字、权限、旧版本输入拒绝、公开弹药记录、结算和场景重置。测试套件不启动游戏或 bot。
 

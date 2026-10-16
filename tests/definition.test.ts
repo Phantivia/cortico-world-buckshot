@@ -14,7 +14,7 @@ describe('World contract', () => {
     const world = BUCKSHOT.create(ctx);
     expect(ctx.cfg).toEqual(BUCKSHOT_DEFAULTS);
     expect(world.id).toBe(BUCKSHOT.id);
-    expect(world.console!().config).toEqual([BUCKSHOT_CONFIG_GROUP]);
+    expect(world.webUi!().config).toEqual([BUCKSHOT_CONFIG_GROUP]);
     for (const path of Object.keys(BUCKSHOT_CONFIG_GROUP.schema.properties)) {
       expect(path.startsWith(`worlds.${BUCKSHOT.id}.`)).toBe(true);
       expect(ctx.cfg).toHaveProperty(path.slice(`worlds.${BUCKSHOT.id}.`.length));
