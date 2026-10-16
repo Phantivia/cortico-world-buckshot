@@ -1,7 +1,7 @@
-import type { ConsoleClientBundle, ConsolePanel } from 'cortico/web/shared/client-panel.ts';
+import type { WebUiClientBundle, WebUiPanel } from 'cortico/web/shared/client-panel.ts';
 import type { BuckshotGameState } from './types.ts';
 
-const game: ConsolePanel = {
+const game: WebUiPanel = {
   mount(ctx) {
     const { ui } = ctx;
     const card = ui.sheet({ title: '游戏' });
@@ -53,4 +53,4 @@ const game: ConsolePanel = {
   },
 };
 
-export default { panels: { game } } satisfies ConsoleClientBundle;
+export default { panels: { game } } satisfies WebUiClientBundle;

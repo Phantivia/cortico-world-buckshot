@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { BlobInput, ToolDef, ToolOutcome, World, WorldHost, WorldConsoleDecl } from 'cortico/core/types.ts';
+import type { BlobInput, ToolDef, ToolOutcome, World, WorldHost, WorldWebUiDecl } from 'cortico/core/types.ts';
 import type { WorldContext } from 'cortico/world.ts';
 import { nowIso } from 'cortico/core/util.ts';
 import { BuckshotBridge } from './bridge.ts';
@@ -12,8 +12,8 @@ import { prepareImplant } from './implant.ts';
 import { renderSnapshot, StateNarrator } from './render.ts';
 import { BUCKSHOT_TOOL_DECLS } from './tools.ts';
 import type { BuckshotObservation, BuckshotSnapshot } from './protocol.ts';
-import { BUCKSHOT_PANEL_DECLS } from './console/panels.ts';
-import type { BuckshotGameState } from './console/types.ts';
+import { BUCKSHOT_PANEL_DECLS } from './webui/panels.ts';
+import type { BuckshotGameState } from './webui/types.ts';
 import { describeObservation, frameKey } from './events.ts';
 import { Settlement } from './settle.ts';
 
@@ -76,7 +76,7 @@ export class BuckshotWorld implements World {
     } }));
   }
 
-  console(): WorldConsoleDecl {
+  webUi(): WorldWebUiDecl {
     return {
       label: '恶魔轮盘', config: [BUCKSHOT_CONFIG_GROUP], panels: [...BUCKSHOT_PANEL_DECLS],
       invoke: async (panel, method) => {
@@ -190,7 +190,7 @@ export class BuckshotWorld implements World {
       this.state = 'loading';
       const executableFile = normalizeExecutableFile(this.ctx.cfg.executableFile);
       if (!executableFile || !existsSync(executableFile) || !statSync(executableFile).isFile()) {
-        throw new Error(executableFile ? `找不到游戏程序: ${executableFile}` : '未配置游戏程序。在控制台恶魔轮盘页的配置里选择 Buckshot Roulette.exe。');
+        throw new Error(executableFile ? `找不到游戏程序: ${executableFile}` : '未配置游戏程序。在 WebUI 恶魔轮盘页的配置里选择 Buckshot Roulette.exe。');
       }
       const runtimeDir = this.ctx.cfg.runtimeDir || join(this.ctx.botDir, 'runtimes', 'buckshot');
       const packFile = await prepareImplant(executableFile, runtimeDir);
