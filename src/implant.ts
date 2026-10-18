@@ -56,9 +56,7 @@ export const BUCKSHOT_SCRIPT_HOOKS: readonly ScriptHook[] = [
     ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.joinLobby(', 'JoinLobby(', 1],
     ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.leaveLobby(', 'LeaveLobby(', 1],
     ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 4],
-    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
-    ['multiplayer/scripts/MP_LobbyController.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
-    ['multiplayer/scripts/global scripts/MP_LobbyUI.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.setLobbyMemberLimit(', 'SetLobbyMemberLimit(', 2],
     ['multiplayer/scripts/global scripts/MP_OutroManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 6],
     ['multiplayer/scripts/global scripts/MP_UserInstanceHandler.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 1],
     ['multiplayer/scripts/user scripts/MP_UserStateManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 1],
@@ -119,11 +117,11 @@ export function setProjectSettings(project: Buffer, values: ReadonlyMap<string, 
   return Buffer.concat([header, ...records]);
 }
 
-/** `localPeer` builds the pack for the second local process, which keeps its settings and saves apart from the host's. */
-export async function prepareImplant(executableFile: string, runtimeDir: string, localPeer = false): Promise<string> {
+/** A `profile` such as 'local-peer' builds the pack for another local process, which keeps its settings and saves apart. */
+export async function prepareImplant(executableFile: string, runtimeDir: string, profile = ''): Promise<string> {
   await verifyInstallation(executableFile);
   const bridge = await readFile(BRIDGE_FILE);
-  const saveProfile = createHash('sha256').update(resolve(runtimeDir)).update(localPeer ? ':local-peer' : '').digest('hex').slice(0, 16);
+  const saveProfile = createHash('sha256').update(resolve(runtimeDir)).update(profile ? `:${profile}` : '').digest('hex').slice(0, 16);
   const revision = createHash('sha256').update(bridge).update(JSON.stringify(BUCKSHOT_SCRIPT_HOOKS)).update(setProjectSettings.toString()).update(prepareImplant.toString()).update(saveProfile).digest('hex');
   const directory = join(runtimeDir, BUCKSHOT_PROFILE.id, revision);
   const outputFile = join(directory, 'buckshot.pck');

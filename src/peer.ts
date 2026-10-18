@@ -8,6 +8,10 @@ import type { BuckshotSnapshot } from './protocol.ts';
 export const LOCAL_PEER_ID = '76561190000000001';
 
 export interface LocalPeerOptions {
+  /** The lobby member id, LOCAL_PEER_ID unless a check runs several peers. */
+  id: string;
+  /** Checks how Steam players fare: the host counts this peer as one and lists it what Steam would. */
+  mockSteamPlayer?: boolean;
   executableFile: string;
   packFile: string;
   logFile: string;
@@ -45,7 +49,7 @@ export class LocalPeer {
     const args = ['--windowed'];
     if (options.screenIndex !== null) args.push('--screen', String(options.screenIndex));
     if (options.muteAudio) args.push('--audio-driver', 'Dummy');
-    const game = spawn(options.executableFile, [...args, '--main-pack', options.packFile, '--', `--cortico-executable=${options.executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`, `--cortico-peer-id=${LOCAL_PEER_ID}`, `--cortico-peer-name=${options.name}`],
+    const game = spawn(options.executableFile, [...args, '--main-pack', options.packFile, '--', `--cortico-executable=${options.executableFile}`, `--cortico-port=${port}`, `--cortico-token=${bridge.token}`, `--cortico-peer-id=${options.id}`, `--cortico-peer-name=${options.name}`],
       { cwd: dirname(options.executableFile), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     this.game = game;
     game.stdout?.pipe(log, { end: false }); game.stderr?.pipe(log, { end: false });
@@ -92,20 +96,20 @@ export class LocalPeer {
   }
 
   private readonly fromHost = (message: { to?: unknown; from?: unknown; data?: unknown }) => {
-    if (message.to === LOCAL_PEER_ID) this.bridge.send('net', { from: message.from, data: message.data });
+    if (message.to === this.options.id) this.bridge.send('net', { from: message.from, data: message.data });
   };
 
   // The peer talks to the host only, whatever member it addresses.
-  private readonly fromPeer = (message: { data?: unknown }) => { this.host.send('net', { from: LOCAL_PEER_ID, data: message.data }); };
+  private readonly fromPeer = (message: { data?: unknown }) => { this.host.send('net', { from: this.options.id, data: message.data }); };
 
-  private readonly rosterFromHost = (message: { roster?: unknown }) => { this.bridge.send('roster', { roster: message.roster }); };
+  private readonly rosterFromHost = (message: { peer?: unknown; roster?: unknown }) => { if (message.peer === this.options.id) this.bridge.send('roster', { roster: message.roster }); };
 
   /** The peer's lobby scripts asked to join or leave; the host answers in order. */
   private readonly lobbyRequest = (message: { event?: unknown; lobby?: unknown }) => {
     this.requests = this.requests.then(async () => {
       if (message.event === 'leave') { await this.leave(); return; }
       if (message.event !== 'join') return;
-      const reply = await this.host.request('peer_attach', { peer: LOCAL_PEER_ID, name: this.options.name }, this.options.actionTimeoutMs).catch(() => null);
+      const reply = await this.host.request('peer_attach', { peer: this.options.id, name: this.options.name, mock: this.options.mockSteamPlayer === true }, this.options.actionTimeoutMs).catch(() => null);
       const roster = (reply as { roster?: { lobby?: string } } | null)?.roster;
       const ok = reply?.ok === true && roster?.lobby === message.lobby;
       if (reply?.ok && !ok) await this.leave();
@@ -115,7 +119,7 @@ export class LocalPeer {
   };
 
   private async leave(): Promise<void> {
-    await this.host.request('peer_detach', { peer: LOCAL_PEER_ID }, this.options.actionTimeoutMs).catch(() => undefined);
+    await this.host.request('peer_detach', { peer: this.options.id }, this.options.actionTimeoutMs).catch(() => undefined);
     if (this.joined) { this.joined = false; this.options.onChange('left'); }
   }
 

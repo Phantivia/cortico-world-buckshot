@@ -29,9 +29,9 @@ var multiplayer_status = {}
 var peer_id = 0
 var peer_name = ""
 var roster = {"lobby": 0, "owner": 0, "members": []}
-# Local peers, in the host process: member id -> name.
+# Local peers, in the host process: member id -> {name, mock}, and the member list each was last sent.
 var local_peers = {}
-var last_roster = ""
+var last_rosters = {}
 # Packets relayed between host and local peer, read before Steam's.
 var relay_inbox = []
 
@@ -543,8 +543,8 @@ func Handle(request):
 			relay_inbox.append({"steam_id_remote": int(request.get("from", "0")), "data": Marshalls.base64_to_raw(str(request.get("data", "")))})
 		"peer_lobby":
 			var refusal = PeerRefusal(int(request.get("peer", "0")))
-			Reply(id, refusal == "", refusal if refusal != "" else "lobby open", {"lobby": str(get_node("/root/GlobalSteam").LOBBY_ID)})
-		"peer_attach": AttachPeer(id, int(request.get("peer", "0")), str(request.get("name", "")))
+			Reply(id, refusal == "", refusal if refusal != "" else "lobby open", {"lobby": str(get_node("/root/GlobalSteam").LOBBY_ID), "memberLimit": MemberLimit()})
+		"peer_attach": AttachPeer(id, int(request.get("peer", "0")), str(request.get("name", "")), bool(request.get("mock", false)))
 		"peer_detach":
 			DetachPeer(int(request.get("peer", "0")))
 			Reply(id, true, "local peer detached")
@@ -633,6 +633,12 @@ func Capture(id):
 # Local peer. The host keeps its Steam lobby; one more game process on this machine sits in it as a member Steam does not
 # know about. The calls below stand in for Steam's in the multiplayer scripts and give Steam everything else, so with no
 # local peer the game behaves as it does without the bridge. Member ids cross the bridge as strings: they exceed 2^53.
+#
+# Steam players can share the lobby: the host hands out seats and relays every packet, so their unmodified games seat the
+# local peer from the host's setup packet although Steam never lists it to them. Two things only Steam would tell them
+# are covered here: the seat the local peer takes (the Steam member limit drops by one) and its leaving mid-match,
+# which they could not see, so everyone goes back to the lobby. A local peer started with mock set is checked as such a
+# Steam player instead: it counts as one and its member list leaves the real local peer out, as Steam's would.
 
 func IsLocalPeer():
 	return peer_id != 0
@@ -647,7 +653,11 @@ func Lobby():
 	return get_node("/root/GlobalSteam").LOBBY_ID
 
 func SendP2PPacket(target, data, send_type, channel):
-	if peer_id != 0 or local_peers.has(target):
+	if peer_id != 0:
+		# members accept packets from the host only; the host relays the rest
+		if target == roster.owner: Send({"kind": "net", "from": str(peer_id), "to": str(target), "data": Marshalls.raw_to_base64(data)})
+		return true
+	if local_peers.has(target):
 		Send({"kind": "net", "from": str(get_node("/root/GlobalSteam").STEAM_ID), "to": str(target), "data": Marshalls.raw_to_base64(data)})
 		return true
 	return Steam.sendP2PPacket(target, data, send_type, channel)
@@ -684,23 +694,38 @@ func JoinLobby(lobby):
 	Send({"kind": "peer", "event": "join", "lobby": str(lobby)})
 
 func LeaveLobby(lobby):
-	if peer_id == 0:
-		Steam.leaveLobby(lobby)
+	if peer_id != 0:
+		roster = {"lobby": 0, "owner": 0, "members": []}
+		Send({"kind": "peer", "event": "leave"})
 		return
-	roster = {"lobby": 0, "owner": 0, "members": []}
-	Send({"kind": "peer", "event": "leave"})
+	Steam.leaveLobby(lobby)
+	if lobby != Lobby(): return
+	# As Steam would tell them: the host left and the lobby passed to them. A local peer mid-match exits as from a host
+	# that disconnected; one on the lobby screen holds a lobby nobody else is in.
+	for member in local_peers.keys():
+		Send({"kind": "roster", "peer": str(member), "roster": {"lobby": str(lobby), "owner": str(member), "members": [{"id": str(member), "name": local_peers[member].name}]}})
+	local_peers.clear()
+	last_rosters.clear()
 
-func SetLobbyJoinable(lobby, joinable):
-	if peer_id != 0: return
-	# Steam members would not see the local peer, so nobody else may join while it is in the lobby
-	Steam.setLobbyJoinable(lobby, joinable and local_peers.is_empty())
+func SetLobbyMemberLimit(lobby, limit):
+	Steam.setLobbyMemberLimit(lobby, limit - RealPeerCount() if lobby == Lobby() else limit)
 
 func PersonaName(id):
-	if local_peers.has(id): return local_peers[id]
+	if local_peers.has(id): return local_peers[id].name
 	if peer_id == 0: return Steam.getFriendPersonaName(id)
 	for member in roster.members:
 		if member.id == id: return member.name
 	return ""
+
+func RealPeerCount():
+	var count = 0
+	for member in local_peers.keys():
+		if !local_peers[member].mock: count += 1
+	return count
+
+## Members Steam lists, with mock Steam players counted among them.
+func SteamMemberCount():
+	return Steam.getNumLobbyMembers(Lobby()) + local_peers.size() - RealPeerCount()
 
 ## Why this process cannot take `member` into its lobby now, or "".
 func PeerRefusal(member):
@@ -709,44 +734,51 @@ func PeerRefusal(member):
 	if peer_id != 0 or member == 0: return "not a host process"
 	if steam.LOBBY_ID == 0 or steam.STEAM_ID != steam.HOST_ID: return "not hosting a lobby"
 	if scene == null or scene.scene_file_path.get_file().get_basename() != "mp_lobby": return "not on the lobby screen"
-	if !local_peers.has(member) and (!local_peers.is_empty() or Steam.getNumLobbyMembers(steam.LOBBY_ID) != 1): return "the lobby has other players"
+	if !local_peers.has(member) and SteamMemberCount() + RealPeerCount() >= steam.lobby_player_limit: return "the lobby is full"
 	return ""
 
-func AttachPeer(id, member, name):
+func AttachPeer(id, member, name, mock):
 	var refusal = PeerRefusal(member)
 	if refusal != "":
 		Reply(id, false, refusal)
 		return
 	var steam = get_node("/root/GlobalSteam")
-	local_peers[member] = name
-	Steam.setLobbyJoinable(steam.LOBBY_ID, false)
+	local_peers[member] = {"name": name, "mock": mock}
+	if !mock: SetLobbyMemberLimit(steam.LOBBY_ID, steam.lobby_player_limit)
 	Steam.lobby_chat_update.emit(steam.LOBBY_ID, member, member, Steam.CHAT_MEMBER_STATE_CHANGE_ENTERED)
-	Reply(id, true, "local peer attached", {"roster": Roster()})
+	Reply(id, true, "local peer attached", {"roster": Roster(member), "memberLimit": MemberLimit()})
 
 func DetachPeer(member):
 	if !local_peers.has(member): return
+	var mock = local_peers[member].mock
 	local_peers.erase(member)
+	last_rosters.erase(member)
 	var steam = get_node("/root/GlobalSteam")
+	var handler = First("MP_UserInstanceHandler.gd")
+	if !mock and handler != null and SteamMemberCount() > 1 and handler.removing_instances and !handler.intermediary.game_state.MAIN_running_win_routine:
+		handler.Packet_ExitGameWithLobby()
 	Steam.lobby_chat_update.emit(steam.LOBBY_ID, member, member, Steam.CHAT_MEMBER_STATE_CHANGE_LEFT)
-	var scene = get_tree().current_scene
-	if steam.LOBBY_ID != 0 and steam.STEAM_ID == steam.HOST_ID and scene != null and scene.scene_file_path.get_file().get_basename() == "mp_lobby":
-		Steam.setLobbyJoinable(steam.LOBBY_ID, true)
+	if !mock: SetLobbyMemberLimit(steam.LOBBY_ID, steam.lobby_player_limit)
 
-func Roster():
+func MemberLimit():
+	return Steam.call("getLobbyMemberLimit", Lobby()) if Steam.has_method("getLobbyMemberLimit") else null
+
+## The member list `member` sees: all of it, or for a mock Steam player what Steam would list.
+func Roster(member):
 	var steam = get_node("/root/GlobalSteam")
 	var members = []
-	for member in steam.LOBBY_MEMBERS: members.append({"id": str(member.steam_id), "name": member.steam_name})
+	for entry in steam.LOBBY_MEMBERS:
+		if local_peers[member].mock and local_peers.has(entry.steam_id) and !local_peers[entry.steam_id].mock: continue
+		members.append({"id": str(entry.steam_id), "name": entry.steam_name})
 	return {"lobby": str(steam.LOBBY_ID), "owner": str(steam.HOST_ID), "members": members}
 
 func PublishRoster():
-	if local_peers.is_empty():
-		last_roster = ""
-		return
-	var current = Roster()
-	var serialized = JSON.stringify(current)
-	if serialized == last_roster: return
-	last_roster = serialized
-	Send({"kind": "roster", "roster": current})
+	for member in local_peers.keys():
+		var current = Roster(member)
+		var serialized = JSON.stringify(current)
+		if serialized == last_rosters.get(member, ""): continue
+		last_rosters[member] = serialized
+		Send({"kind": "roster", "peer": str(member), "roster": current})
 
 func SetRoster(value, announce):
 	if !(value is Dictionary): return
