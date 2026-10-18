@@ -41,6 +41,10 @@ describe('script hooks', () => {
     expect(() => applyHook('func changed(): pass', hook)).toThrow('missing');
     expect(() => applyHook(hook.anchor.repeat(2), hook)).toThrow('Ambiguous');
   });
+  it('routes a Steam call through the bridge at every counted call site', () => {
+    const call: ScriptHook = { path: 'example.gd', anchor: 'Steam.joinLobby(', insertion: 'bridge.JoinLobby(', replace: true, occurrences: 2 };
+    expect(applyHook('Steam.joinLobby(a)\nSteam.joinLobby(b)\n', call)).toBe('bridge.JoinLobby(a)\nbridge.JoinLobby(b)\n');
+  });
   it('observes each public ejection before the game removes that shell', () => {
     const ejection: ScriptHook = { path: 'scripts/ShellEjectManager.gd', anchor: '\tremove()\n', insertion: '\tobserve()\n', before: true, occurrences: 2 };
     expect(applyHook(ejection.anchor.repeat(2), ejection)).toBe('\tobserve()\n\tremove()\n\tobserve()\n\tremove()\n');

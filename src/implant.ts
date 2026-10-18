@@ -8,7 +8,7 @@ import { readPack, readResource, writePatchedPack } from './pck.ts';
 const BRIDGE_FILE = fileURLToPath(new URL('./native/bridge.gd', import.meta.url));
 const BRIDGE_NODE = 'get_node("/root/CorticoBridge")';
 
-export interface ScriptHook { path: string; anchor: string; insertion: string; before?: boolean; occurrences?: number; }
+export interface ScriptHook { path: string; anchor: string; insertion: string; before?: boolean; replace?: boolean; occurrences?: number; }
 
 export const BUCKSHOT_SCRIPT_HOOKS: readonly ScriptHook[] = [
   { path: 'scripts/ShellSpawner.gd', anchor: '\tanim_compartment.play("show shells")\n', insertion: `\t${BRIDGE_NODE}.ObserveLoad(temp_live, temp_blank)\n` },
@@ -43,13 +43,36 @@ export const BUCKSHOT_SCRIPT_HOOKS: readonly ScriptHook[] = [
   { path: 'multiplayer/scripts/global scripts/MP_OutroManager.gd', anchor: '\tdialogue_results.ShowText_Forever(tr("MP_UI MATCH RESULTS"))\n', insertion: `\t${BRIDGE_NODE}.ObserveOutcome("completed")\n` },
   { path: 'multiplayer/scripts/user scripts/MP_ShotgunInteraction.gd', anchor: '\tvar current_shell = intermediary.game_state.MAIN_shooter_shell\n', insertion: `\t${BRIDGE_NODE}.ObserveShot(str(active_shooter_socket_self), str(active_shooter_socket_target), current_shell)\n` },
   ...['firstperson', 'thirdperson'].map((person): ScriptHook => ({ path: 'multiplayer/scripts/user scripts/MP_ItemInteraction.gd', anchor: `\tanimator_items_${person}.play(animation_name)\n`, insertion: `\t${BRIDGE_NODE}.ObserveItem(str(properties.socket_number), active_id, properties.intermediary.game_state.MAIN_item_resource_array)\n` })),
+  // Local peer: a second game process sits in the host's lobby as a member Steam does not know about. Its packets,
+  // membership and name go through CorticoBridge, which hands every other member to Steam.
+  ...([
+    ['multiplayer/scripts/MP_PacketManager.gd', 'Steam.sendP2PPacket(', 'SendP2PPacket(', 2],
+    ['multiplayer/scripts/MP_PacketManager.gd', 'Steam.getAvailableP2PPacketSize(0)', 'GetAvailableP2PPacketSize(0)', 2],
+    ['multiplayer/scripts/MP_PacketManager.gd', 'Steam.readP2PPacket(packet_size, 0)', 'ReadP2PPacket(packet_size, 0)', 1],
+    ['multiplayer/scripts/MP_PacketManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.getNumLobbyMembers(', 'NumLobbyMembers(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.getLobbyMemberByIndex(', 'LobbyMemberByIndex(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.getLobbyOwner(', 'LobbyOwner(', 2],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.joinLobby(', 'JoinLobby(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.leaveLobby(', 'LeaveLobby(', 1],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 4],
+    ['multiplayer/scripts/MP_LobbyManager.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
+    ['multiplayer/scripts/MP_LobbyController.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
+    ['multiplayer/scripts/global scripts/MP_LobbyUI.gd', 'Steam.setLobbyJoinable(', 'SetLobbyJoinable(', 1],
+    ['multiplayer/scripts/global scripts/MP_OutroManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 6],
+    ['multiplayer/scripts/global scripts/MP_UserInstanceHandler.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 1],
+    ['multiplayer/scripts/user scripts/MP_UserStateManager.gd', 'Steam.getFriendPersonaName(', 'PersonaName(', 1],
+  ] as const).map(([path, anchor, call, occurrences]): ScriptHook => ({ path, anchor, insertion: `${BRIDGE_NODE}.${call}`, replace: true, occurrences })),
+  // The local peer leaves Steam uninitialised, so it never acts as the account the host is signed in with.
+  { path: 'scripts/Steam.gd', anchor: 'func InitializeSteam():\n', insertion: `\tif ${BRIDGE_NODE}.IsLocalPeer(): return\n` },
+  { path: 'scripts/Steam.gd', anchor: '\tif GlobalVariables.mp_debugging: STEAM_ID = 1234\n', insertion: `\t${BRIDGE_NODE}.AdoptPeerIdentity(self)\n` },
 ];
 
 export function applyHook(source: string, hook: ScriptHook): string {
   const segments = source.split(hook.anchor);
   if (segments.length === 1) throw new Error(`Game hook anchor missing: ${hook.path}`);
   if (segments.length - 1 !== (hook.occurrences ?? 1)) throw new Error(`Ambiguous game hook anchor: ${hook.path}`);
-  return segments.join(hook.before ? hook.insertion + hook.anchor : hook.anchor + hook.insertion);
+  return segments.join(hook.replace ? hook.insertion : hook.before ? hook.insertion + hook.anchor : hook.anchor + hook.insertion);
 }
 
 /** Adds an autoload to ECFG without re-encoding existing Variant values. */
@@ -96,10 +119,11 @@ export function setProjectSettings(project: Buffer, values: ReadonlyMap<string, 
   return Buffer.concat([header, ...records]);
 }
 
-export async function prepareImplant(executableFile: string, runtimeDir: string): Promise<string> {
+/** `localPeer` builds the pack for the second local process, which keeps its settings and saves apart from the host's. */
+export async function prepareImplant(executableFile: string, runtimeDir: string, localPeer = false): Promise<string> {
   await verifyInstallation(executableFile);
   const bridge = await readFile(BRIDGE_FILE);
-  const saveProfile = createHash('sha256').update(resolve(runtimeDir)).digest('hex').slice(0, 16);
+  const saveProfile = createHash('sha256').update(resolve(runtimeDir)).update(localPeer ? ':local-peer' : '').digest('hex').slice(0, 16);
   const revision = createHash('sha256').update(bridge).update(JSON.stringify(BUCKSHOT_SCRIPT_HOOKS)).update(setProjectSettings.toString()).update(prepareImplant.toString()).update(saveProfile).digest('hex');
   const directory = join(runtimeDir, BUCKSHOT_PROFILE.id, revision);
   const outputFile = join(directory, 'buckshot.pck');
