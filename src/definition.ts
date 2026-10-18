@@ -145,6 +145,11 @@ export const BUCKSHOT: WorldDefinition<BuckshotConfigSection> = {
         trigger: 'debounce',
       },
       {
+        type: 'buckshot.peer',
+        description: { zh: 'WebUI「本地加入」的本地玩家进入或离开了多人房间。', en: 'The local player started from the WebUI joined or left the multiplayer lobby.' },
+        trigger: 'debounce',
+      },
+      {
         type: 'buckshot.clipboard',
         description: { zh: '游戏把多人大厅编号复制到了剪贴板。', en: 'The game copied the multiplayer lobby id to the clipboard.' },
         trigger: 'debounce',
