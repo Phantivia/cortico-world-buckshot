@@ -263,16 +263,16 @@ export class BuckshotWorld implements World {
     this.peerError = '';
     this.peerStarting = (async () => {
       const lobby = await bridge.request('peer_lobby', { peer: LOCAL_PEER_ID }, this.ctx.cfg.actionTimeoutMs);
-      if (!lobby.ok) throw new Error(`${{ 'not hosting a lobby': '可缇还没有在多人模式里建房间。', 'not on the lobby screen': '房间已经离开大厅界面（对局进行中）。', 'the lobby has other players': '房间里已有其他玩家；本地加入只用于两人对打。' }[lobby.detail] ?? lobby.detail}`);
+      if (!lobby.ok) throw new Error(`${{ 'not hosting a lobby': '可缇还没有在多人模式里建房间。', 'not on the lobby screen': '房间已经离开大厅界面（对局进行中）。', 'the lobby is full': '房间已满。' }[lobby.detail] ?? lobby.detail}`);
       const executableFile = normalizeExecutableFile(this.ctx.cfg.executableFile);
       const runtimeDir = this.ctx.cfg.runtimeDir || join(this.ctx.botDir, 'runtimes', 'buckshot');
-      const packFile = await prepareImplant(executableFile, runtimeDir, true);
+      const packFile = await prepareImplant(executableFile, runtimeDir, 'local-peer');
       const logDir = join(this.ctx.dataDir, 'buckshot');
       await mkdir(logDir, { recursive: true });
       const options = this.ctx.cfg.localPeer;
       const name = options.name.trim() || 'Player 2';
       const peer = new LocalPeer(bridge, {
-        executableFile, packFile, logFile: join(logDir, 'game-peer.log'), name, screenIndex: options.screenIndex, muteAudio: options.muteAudio,
+        id: LOCAL_PEER_ID, executableFile, packFile, logFile: join(logDir, 'game-peer.log'), name, screenIndex: options.screenIndex, muteAudio: options.muteAudio,
         startupTimeoutMs: this.ctx.cfg.startupTimeoutMs, actionTimeoutMs: this.ctx.cfg.actionTimeoutMs,
         onChange: (change) => {
           if (change === 'joined') void this.emit('peer', `本地玩家 ${name} 加入了房间。`);
