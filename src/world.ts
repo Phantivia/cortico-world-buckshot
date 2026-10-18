@@ -16,6 +16,7 @@ import { BUCKSHOT_PANEL_DECLS } from './webui/panels.ts';
 import type { BuckshotGameState } from './webui/types.ts';
 import { describeObservation, frameKey } from './events.ts';
 import { Settlement } from './settle.ts';
+import { LOCAL_PEER_ID, LocalPeer } from './peer.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -39,6 +40,10 @@ export class BuckshotWorld implements World {
   private readonly narrator = new StateNarrator();
   /** While an input waits for its settlement: the observations go into its receipt instead of events. */
   private settling: { observations: string[] } | null = null;
+  /** The second local game process that joins this game's multiplayer lobby; see LocalPeer. */
+  private peer: LocalPeer | null = null;
+  private peerStarting: Promise<void> | null = null;
+  private peerError = '';
 
   constructor(private readonly ctx: WorldContext<BuckshotConfigSection>) {}
 
@@ -83,6 +88,8 @@ export class BuckshotWorld implements World {
         if (panel !== 'game') throw new Error('未知面板。');
         if (method === 'start') await this.startGame();
         else if (method === 'stop') await this.stopGame();
+        else if (method === 'peerJoin') await this.startPeer();
+        else if (method === 'peerLeave') await this.stopPeer();
         else if (method === 'capture') {
           const reply = await this.request('capture', {});
           if (!reply.ok || !reply.png) throw new Error(reply.detail);
@@ -99,7 +106,8 @@ export class BuckshotWorld implements World {
 
   private gameState(): BuckshotGameState {
     const snapshot = this.bridge?.snapshot;
-    return { state: this.state, error: this.error, stoppable: this.game !== null || this.starting !== null, scene: snapshot?.scene, mode: snapshot?.mode, round: snapshot?.round };
+    const peer = this.peerStarting ? 'starting' : this.peer?.joined ? 'joined' : this.peer ? 'menu' : 'offline';
+    return { state: this.state, error: this.error, stoppable: this.game !== null || this.starting !== null, scene: snapshot?.scene, mode: snapshot?.mode, round: snapshot?.round, peer, peerError: this.peerError };
   }
 
   async start(host: WorldHost): Promise<void> {
@@ -112,6 +120,7 @@ export class BuckshotWorld implements World {
     if (this.frameTimer) clearTimeout(this.frameTimer);
     this.frameTimer = null;
     this.frameWanted = false;
+    await this.stopPeer();
     if (this.ctx.cfg.closeOnStop) await this.stopGame();
     else { await this.bridge?.stop(); this.bridge = null; this.game = null; this.state = 'offline'; }
     await this.eventTail;
@@ -205,7 +214,7 @@ export class BuckshotWorld implements World {
         if (['shot', 'reveal', 'revival', 'result', 'dialogue'].includes(event.kind)) this.scheduleFrame();
       });
       bridge.on('fault', (error: Error) => { this.state = 'error'; this.error = error.message; void this.emit('error', error.message); });
-      bridge.on('disconnected', () => { if (this.bridge === bridge) { this.state = 'offline'; void this.emit('disconnected', '游戏事件桥已断开。'); } });
+      bridge.on('disconnected', () => { void this.stopPeer(); if (this.bridge === bridge) { this.state = 'offline'; void this.emit('disconnected', '游戏事件桥已断开。'); } });
       const port = await bridge.start();
       const logDir = join(this.ctx.dataDir, 'buckshot');
       await mkdir(logDir, { recursive: true });
@@ -245,7 +254,51 @@ export class BuckshotWorld implements World {
     }
   }
 
+  /** Starts the local peer once this game hosts a lobby on its lobby screen; it joins that lobby on its own. */
+  async startPeer(): Promise<void> {
+    if (this.peerStarting) return this.peerStarting;
+    if (this.peer) throw new Error('本地客户端已在运行。');
+    const bridge = this.bridge;
+    if (!bridge || this.state !== 'online') throw new Error('先启动游戏并等它连接。');
+    this.peerError = '';
+    this.peerStarting = (async () => {
+      const lobby = await bridge.request('peer_lobby', { peer: LOCAL_PEER_ID }, this.ctx.cfg.actionTimeoutMs);
+      if (!lobby.ok) throw new Error(`${{ 'not hosting a lobby': '可缇还没有在多人模式里建房间。', 'not on the lobby screen': '房间已经离开大厅界面（对局进行中）。', 'the lobby has other players': '房间里已有其他玩家；本地加入只用于两人对打。' }[lobby.detail] ?? lobby.detail}`);
+      const executableFile = normalizeExecutableFile(this.ctx.cfg.executableFile);
+      const runtimeDir = this.ctx.cfg.runtimeDir || join(this.ctx.botDir, 'runtimes', 'buckshot');
+      const packFile = await prepareImplant(executableFile, runtimeDir, true);
+      const logDir = join(this.ctx.dataDir, 'buckshot');
+      await mkdir(logDir, { recursive: true });
+      const options = this.ctx.cfg.localPeer;
+      const name = options.name.trim() || 'Player 2';
+      const peer = new LocalPeer(bridge, {
+        executableFile, packFile, logFile: join(logDir, 'game-peer.log'), name, screenIndex: options.screenIndex, muteAudio: options.muteAudio,
+        startupTimeoutMs: this.ctx.cfg.startupTimeoutMs, actionTimeoutMs: this.ctx.cfg.actionTimeoutMs,
+        onChange: (change) => {
+          if (change === 'joined') void this.emit('peer', `本地玩家 ${name} 加入了房间。`);
+          if (change === 'left') void this.emit('peer', `本地玩家 ${name} 离开了房间。`);
+          if (change === 'closed' && this.peer === peer) this.peer = null;
+        },
+      });
+      this.peer = peer;
+      await peer.start((lobby as { lobby?: string }).lobby ?? '');
+    })().catch((error) => {
+      this.peer = null;
+      this.peerError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }).finally(() => { this.peerStarting = null; });
+    return this.peerStarting;
+  }
+
+  async stopPeer(): Promise<void> {
+    if (this.peerStarting) await this.peerStarting.catch(() => undefined);
+    const peer = this.peer;
+    this.peer = null;
+    await peer?.stop();
+  }
+
   async stopGame(): Promise<void> {
+    await this.stopPeer();
     if (this.frameTimer) clearTimeout(this.frameTimer);
     this.frameTimer = null;
     this.frameWanted = false;

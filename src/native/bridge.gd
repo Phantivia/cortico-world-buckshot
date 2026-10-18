@@ -25,12 +25,23 @@ var scene_id = 0
 var seat_health = {}
 var outcome = {}
 var multiplayer_status = {}
+# Local peer, in the second process: its lobby member id and name, and the host's lobby as the host last reported it.
+var peer_id = 0
+var peer_name = ""
+var roster = {"lobby": 0, "owner": 0, "members": []}
+# Local peers, in the host process: member id -> name.
+var local_peers = {}
+var last_roster = ""
+# Packets relayed between host and local peer, read before Steam's.
+var relay_inbox = []
 
 func _init():
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--cortico-executable="):
 			if !ProjectSettings.load_resource_pack(arg.trim_prefix("--cortico-executable="), false):
 				push_error("Cortico could not load the original game resource pack")
+		if arg.begins_with("--cortico-peer-id="): peer_id = int(arg.trim_prefix("--cortico-peer-id="))
+		if arg.begins_with("--cortico-peer-name="): peer_name = arg.trim_prefix("--cortico-peer-name=")
 
 func _ready():
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -95,6 +106,7 @@ func _process(delta):
 	if elapsed >= 0.1:
 		elapsed = 0
 		Publish()
+		PublishRoster()
 	for action in held_actions.keys():
 		if Time.get_ticks_msec() >= held_actions[action]:
 			ReleaseAction(action)
@@ -527,6 +539,32 @@ func Handle(request):
 				else: held_controller_buttons.erase(button)
 			Reply(id, true, "input delivered")
 		"capture": Capture(id)
+		"net":
+			relay_inbox.append({"steam_id_remote": int(request.get("from", "0")), "data": Marshalls.base64_to_raw(str(request.get("data", "")))})
+		"peer_lobby":
+			var refusal = PeerRefusal(int(request.get("peer", "0")))
+			Reply(id, refusal == "", refusal if refusal != "" else "lobby open", {"lobby": str(get_node("/root/GlobalSteam").LOBBY_ID)})
+		"peer_attach": AttachPeer(id, int(request.get("peer", "0")), str(request.get("name", "")))
+		"peer_detach":
+			DetachPeer(int(request.get("peer", "0")))
+			Reply(id, true, "local peer detached")
+		"peer_enter":
+			var scene = get_tree().current_scene
+			if peer_id == 0 or scene == null or scene.scene_file_path.get_file().get_basename() != "menu":
+				Reply(id, false, "the local peer can enter a lobby only from the main menu")
+				return
+			# as MP_CommandLineChecker.JoinGameOutsideLobby: the lobby scene joins this id once its intro ends
+			var globals = get_node("/root/GlobalVariables")
+			globals.lobby_id_found_in_command_line = int(request.get("lobby", "0"))
+			globals.running_short_intro_in_lobby_scene = true
+			globals.command_line_checked = true
+			get_tree().change_scene_to_file("res://multiplayer/scenes/mp_lobby.tscn")
+			Reply(id, true, "entering lobby")
+		"peer_joined":
+			SetRoster(request.get("roster", {}), false)
+			var response = Steam.CHAT_ROOM_ENTER_RESPONSE_SUCCESS if request.get("ok", false) else Steam.CHAT_ROOM_ENTER_RESPONSE_DOESNT_EXIST
+			Steam.lobby_joined.emit(int(request.get("lobby", "0")), 0, false, response)
+		"roster": SetRoster(request.get("roster", {}), true)
 		"quit":
 			ReleaseInputs()
 			Reply(id, true, "closing owned game")
@@ -591,3 +629,131 @@ func Capture(id):
 	await RenderingServer.frame_post_draw
 	var image = get_viewport().get_texture().get_image()
 	Reply(id, true, "captured", {"png": Marshalls.raw_to_base64(image.save_png_to_buffer())})
+
+# Local peer. The host keeps its Steam lobby; one more game process on this machine sits in it as a member Steam does not
+# know about. The calls below stand in for Steam's in the multiplayer scripts and give Steam everything else, so with no
+# local peer the game behaves as it does without the bridge. Member ids cross the bridge as strings: they exceed 2^53.
+
+func IsLocalPeer():
+	return peer_id != 0
+
+func AdoptPeerIdentity(steam):
+	if peer_id == 0: return
+	steam.STEAM_ID = peer_id
+	steam.STEAM_NAME = peer_name
+	steam.ONLINE = true
+
+func Lobby():
+	return get_node("/root/GlobalSteam").LOBBY_ID
+
+func SendP2PPacket(target, data, send_type, channel):
+	if peer_id != 0 or local_peers.has(target):
+		Send({"kind": "net", "from": str(get_node("/root/GlobalSteam").STEAM_ID), "to": str(target), "data": Marshalls.raw_to_base64(data)})
+		return true
+	return Steam.sendP2PPacket(target, data, send_type, channel)
+
+func GetAvailableP2PPacketSize(channel):
+	if relay_inbox.size() > 0: return relay_inbox[0].data.size()
+	if peer_id != 0: return 0
+	return Steam.getAvailableP2PPacketSize(channel)
+
+func ReadP2PPacket(size, channel):
+	if relay_inbox.size() > 0: return relay_inbox.pop_front()
+	if peer_id != 0: return {}
+	return Steam.readP2PPacket(size, channel)
+
+func NumLobbyMembers(lobby):
+	if peer_id != 0: return roster.members.size()
+	return Steam.getNumLobbyMembers(lobby) + (local_peers.size() if lobby == Lobby() else 0)
+
+func LobbyMemberByIndex(lobby, index):
+	if peer_id != 0: return roster.members[index].id
+	var count = Steam.getNumLobbyMembers(lobby)
+	if index < count or lobby != Lobby(): return Steam.getLobbyMemberByIndex(lobby, index)
+	return local_peers.keys()[index - count]
+
+func LobbyOwner(lobby):
+	if peer_id != 0: return roster.owner
+	return Steam.getLobbyOwner(lobby)
+
+func JoinLobby(lobby):
+	if peer_id == 0:
+		Steam.joinLobby(lobby)
+		return
+	# answered by a peer_joined request once the host has the peer in its lobby
+	Send({"kind": "peer", "event": "join", "lobby": str(lobby)})
+
+func LeaveLobby(lobby):
+	if peer_id == 0:
+		Steam.leaveLobby(lobby)
+		return
+	roster = {"lobby": 0, "owner": 0, "members": []}
+	Send({"kind": "peer", "event": "leave"})
+
+func SetLobbyJoinable(lobby, joinable):
+	if peer_id != 0: return
+	# Steam members would not see the local peer, so nobody else may join while it is in the lobby
+	Steam.setLobbyJoinable(lobby, joinable and local_peers.is_empty())
+
+func PersonaName(id):
+	if local_peers.has(id): return local_peers[id]
+	if peer_id == 0: return Steam.getFriendPersonaName(id)
+	for member in roster.members:
+		if member.id == id: return member.name
+	return ""
+
+## Why this process cannot take `member` into its lobby now, or "".
+func PeerRefusal(member):
+	var steam = get_node("/root/GlobalSteam")
+	var scene = get_tree().current_scene
+	if peer_id != 0 or member == 0: return "not a host process"
+	if steam.LOBBY_ID == 0 or steam.STEAM_ID != steam.HOST_ID: return "not hosting a lobby"
+	if scene == null or scene.scene_file_path.get_file().get_basename() != "mp_lobby": return "not on the lobby screen"
+	if !local_peers.has(member) and (!local_peers.is_empty() or Steam.getNumLobbyMembers(steam.LOBBY_ID) != 1): return "the lobby has other players"
+	return ""
+
+func AttachPeer(id, member, name):
+	var refusal = PeerRefusal(member)
+	if refusal != "":
+		Reply(id, false, refusal)
+		return
+	var steam = get_node("/root/GlobalSteam")
+	local_peers[member] = name
+	Steam.setLobbyJoinable(steam.LOBBY_ID, false)
+	Steam.lobby_chat_update.emit(steam.LOBBY_ID, member, member, Steam.CHAT_MEMBER_STATE_CHANGE_ENTERED)
+	Reply(id, true, "local peer attached", {"roster": Roster()})
+
+func DetachPeer(member):
+	if !local_peers.has(member): return
+	local_peers.erase(member)
+	var steam = get_node("/root/GlobalSteam")
+	Steam.lobby_chat_update.emit(steam.LOBBY_ID, member, member, Steam.CHAT_MEMBER_STATE_CHANGE_LEFT)
+	var scene = get_tree().current_scene
+	if steam.LOBBY_ID != 0 and steam.STEAM_ID == steam.HOST_ID and scene != null and scene.scene_file_path.get_file().get_basename() == "mp_lobby":
+		Steam.setLobbyJoinable(steam.LOBBY_ID, true)
+
+func Roster():
+	var steam = get_node("/root/GlobalSteam")
+	var members = []
+	for member in steam.LOBBY_MEMBERS: members.append({"id": str(member.steam_id), "name": member.steam_name})
+	return {"lobby": str(steam.LOBBY_ID), "owner": str(steam.HOST_ID), "members": members}
+
+func PublishRoster():
+	if local_peers.is_empty():
+		last_roster = ""
+		return
+	var current = Roster()
+	var serialized = JSON.stringify(current)
+	if serialized == last_roster: return
+	last_roster = serialized
+	Send({"kind": "roster", "roster": current})
+
+func SetRoster(value, announce):
+	if !(value is Dictionary): return
+	var members = []
+	for member in value.get("members", []): members.append({"id": int(member.get("id", "0")), "name": str(member.get("name", ""))})
+	var next = {"lobby": int(value.get("lobby", "0")), "owner": int(value.get("owner", "0")), "members": members}
+	if JSON.stringify(next) == JSON.stringify(roster): return
+	roster = next
+	# as Steam's lobby_chat_update: the lobby scripts read the members again
+	if announce and Lobby() != 0 and Lobby() == roster.lobby: Steam.lobby_chat_update.emit(roster.lobby, roster.owner, roster.owner, Steam.CHAT_MEMBER_STATE_CHANGE_ENTERED)

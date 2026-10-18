@@ -91,6 +91,8 @@ export class BuckshotBridge extends EventEmitter {
         request.resolve(reply);
         break;
       }
+      // local peer traffic, relayed by LocalPeer
+      case 'net': case 'roster': case 'peer': this.emit(message.kind, message); break;
       default: throw new Error('Unknown game bridge message');
     }
   }
@@ -112,6 +114,11 @@ export class BuckshotBridge extends EventEmitter {
         reject(error);
       });
     });
+  }
+
+  /** A request the game does not answer. */
+  send(action: string, args: Record<string, unknown>): void {
+    if (this.socket && !this.socket.destroyed) this.socket.write(JSON.stringify({ action, ...args }) + '\n');
   }
 
   private rejectPending(error: Error): void {

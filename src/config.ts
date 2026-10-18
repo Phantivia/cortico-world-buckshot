@@ -10,6 +10,7 @@ export interface BuckshotConfigSection {
   settleTimeoutMs: number;
   screenshotEvents: { enabled: boolean; minIntervalMs: number };
   display: { screenIndex: number | null; muteAudio: boolean };
+  localPeer: { name: string; screenIndex: number | null; muteAudio: boolean };
 }
 
 export const BUCKSHOT_DEFAULTS: BuckshotConfigSection = {
@@ -17,6 +18,7 @@ export const BUCKSHOT_DEFAULTS: BuckshotConfigSection = {
   startupTimeoutMs: 30000, actionTimeoutMs: 10000, settleTimeoutMs: 30000,
   screenshotEvents: { enabled: true, minIntervalMs: 1500 },
   display: { screenIndex: null, muteAudio: false },
+  localPeer: { name: 'Player 2', screenIndex: null, muteAudio: true },
 };
 
 export const BUCKSHOT_CONFIG_GROUP: ConfigGroup = {
@@ -32,6 +34,9 @@ export const BUCKSHOT_CONFIG_GROUP: ConfigGroup = {
       'worlds.buckshot.screenshotEvents.minIntervalMs': { type: 'integer', title: '截图最短间隔', minimum: 500, 'x-suffix': 'ms', 'x-hot': true },
       'worlds.buckshot.display.screenIndex': { type: 'integer', title: '显示器编号', minimum: 0, nullable: true, description: '从 0 开始；留空由游戏选择。', 'x-hot': false },
       'worlds.buckshot.display.muteAudio': { type: 'boolean', title: '静音启动', 'x-hot': false },
+      'worlds.buckshot.localPeer.name': { type: 'string', title: '本地玩家名字', description: '本地加入时在房间里显示的名字。', 'x-hot': true },
+      'worlds.buckshot.localPeer.screenIndex': { type: 'integer', title: '本地客户端显示器', minimum: 0, nullable: true, description: '从 0 开始；留空由游戏选择。', 'x-hot': true },
+      'worlds.buckshot.localPeer.muteAudio': { type: 'boolean', title: '本地客户端静音', description: '两个游戏同放声音时，直播里会听到两遍。', 'x-hot': true },
     },
   },
 };
