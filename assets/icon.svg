@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a1c24"/>
+      <stop offset="1" stop-color="#1e0b10"/>
+    </linearGradient>
+    <linearGradient id="live" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6b78"/>
+      <stop offset="1" stop-color="#d9324a"/>
+    </linearGradient>
+    <linearGradient id="blank" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8fc6ff"/>
+      <stop offset="1" stop-color="#4f86d6"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#d9a634"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+    <g id="shell">
+      <!-- crimped top and paper hull -->
+      <path d="M -40 26 Q -40 0 -14 0 L 14 0 Q 40 0 40 26 L 40 156 L -40 156 Z"/>
+      <!-- crimp folds -->
+      <path d="M -20 4 L -12 22 M 0 2 L 0 22 M 20 4 L 12 22" stroke="#ffffff" stroke-opacity="0.45" stroke-width="5" stroke-linecap="round" fill="none"/>
+      <!-- highlight -->
+      <rect x="-27" y="34" width="11" height="112" rx="5.5" fill="#ffffff" fill-opacity="0.45"/>
+      <!-- brass head and rim -->
+      <rect x="-42" y="150" width="84" height="50" rx="6" fill="url(#brass)"/>
+      <rect x="-50" y="194" width="100" height="18" rx="6" fill="url(#brass)"/>
+      <rect x="-30" y="160" width="9" height="30" rx="4.5" fill="#ffffff" fill-opacity="0.55"/>
+    </g>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- warm light over the table -->
+  <ellipse cx="256" cy="200" rx="150" ry="110" fill="#ff5a6a" fill-opacity="0.18" filter="url(#glow)"/>
+
+  <!-- a live shell and a blank shell -->
+  <g transform="translate(192 186) rotate(-10) translate(0 -106)">
+    <use href="#shell" fill="url(#live)"/>
+  </g>
+  <g transform="translate(320 186) rotate(10) translate(0 -106)">
+    <use href="#shell" fill="url(#blank)"/>
+  </g>
+
+  <!-- Coo's eyes, watching the shells -->
+  <g>
+    <circle cx="198" cy="378" r="48" fill="#22e3ee"/>
+    <circle cx="198" cy="378" r="29" fill="#111322"/>
+    <circle cx="209" cy="367" r="9" fill="#ffffff"/>
+    <circle cx="314" cy="378" r="48" fill="#22e3ee"/>
+    <circle cx="314" cy="378" r="29" fill="#111322"/>
+    <circle cx="325" cy="367" r="9" fill="#ffffff"/>
+  </g>
+</svg>

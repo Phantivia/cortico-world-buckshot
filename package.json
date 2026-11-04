@@ -1,14 +1,18 @@
 {
   "name": "cortico-world-buckshot",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
-  "description": "Buckshot Roulette game events and player actions for Cortico. 此乃直播测试验证之后的world，和其他 Persona / 非直播场景的兼容性有待测试。",
+  "description": "Lets a Cortico bot play Buckshot Roulette (Steam, Windows) through live game events and in-game actions; verified on live streams, compatibility with other Personas and non-streaming setups is untested.",
+  "author": "Phantivia",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Phantivia/cortico-world-buckshot.git"
   },
   "homepage": "https://github.com/Phantivia/cortico-world-buckshot#readme",
+  "bugs": {
+    "url": "https://github.com/Phantivia/cortico-world-buckshot/issues"
+  },
   "keywords": [
     "cortico-world",
     "cortico",
@@ -26,6 +30,24 @@
     "kind": "world",
     "api": 6,
     "displayName": "恶魔轮盘",
+    "icon": "assets/icon.png",
+    "tags": [
+      "streaming",
+      "game",
+      "external-setup",
+      "experimental",
+      "high-cost"
+    ],
+    "locales": {
+      "zh": {
+        "displayName": "恶魔轮盘",
+        "description": "让 Coo 玩 Steam 版《恶魔轮盘》:装填、开枪、道具、生命和字幕实时推给 Coo,Coo 自己拿枪、用道具、点菜单。\n\n**功能**\n- 单人剧情、Double or Nothing 与多人房间都能玩\n- 装填数、揭示的弹药、生命和字幕作为事件推给 Coo,关键时刻附游戏截图\n- Coo 用工具操作桌上目标、菜单和设置,也能发键盘、鼠标、手柄输入\n- 本地加入:操作员在本机再开一个游戏窗口,和 Coo 同桌对打\n- WebUI 页签可启动、关闭游戏,查看当前画面\n\n**安装后还需要**\n1. 在 Windows 上通过 Steam 安装《Buckshot Roulette》,版本须为 v2.2.0.6\n2. 在 World 页的配置里把「游戏程序」指向 `Buckshot Roulette.exe`\n3. 植入资源包由 World 首次启动游戏时自动生成,无需编译\n4. 详细步骤见 [README](https://github.com/Phantivia/cortico-world-buckshot#安装前准备)\n\n仅 Windows。CortiV 直播验证过的参考实现,和其他 Persona、非直播场景的兼容性有待测试。"
+      },
+      "en": {
+        "displayName": "Buckshot Roulette",
+        "description": "Lets Coo play Buckshot Roulette (Steam): loads, shots, items, health and dialogue reach Coo as they happen, and Coo picks up the shotgun, uses items and works the menus itself.\n\n**Features**\n- Plays the story, Double or Nothing and multiplayer lobbies\n- Shell counts, revealed shells, health and dialogue arrive as events, with a screenshot at key moments\n- Coo operates table targets, menus and settings through tools, and can send keyboard, mouse and gamepad input\n- Local join: the operator opens a second game window on the same PC and plays Coo at the same table\n- The WebUI tab starts and closes the game and shows the current view\n\n**After installing you also need**\n1. Buckshot Roulette from Steam on Windows, version v2.2.0.6\n2. Set 游戏程序 (game executable) in the World page settings to `Buckshot Roulette.exe`\n3. The implant pack is generated automatically the first time the World starts the game; nothing to compile\n4. Full steps in the [README](https://github.com/Phantivia/cortico-world-buckshot#before-you-install)\n\nWindows only. A reference implementation verified on CortiV live streams; compatibility with other Personas and non-streaming use has not been tested."
+      }
+    },
     "webUiClient": "dist/webui.js",
     "describe": "describe.json"
   },
@@ -33,6 +55,7 @@
     "src",
     "scripts",
     "dist",
+    "assets",
     "describe.json",
     "CHANGELOG.md",
     "README.md",
